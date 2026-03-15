@@ -1,0 +1,14 @@
+FROM ghcr.io/openclaw/openclaw:latest
+
+USER root
+
+# Install dependencies for WDK and native modules
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install WDK packages globally or in a place that OpenClaw can use
+RUN npm install -g @tetherto/wdk @tetherto/wdk-wallet-native @sinclair/typebox axios
+
+USER node

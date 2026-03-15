@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  apa-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: apa-backend
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KUVARPAY_API_KEY=${KUVARPAY_API_KEY}
+      - OPENCLAW_URL=http://apa-agent:8000
+    ports:
+      - "3001:3001"
+    networks:
+      - kuvarpay-network
+    depends_on:
+      - apa-agent
+
+  apa-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: apa-worker
+    command: npm run start:worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - WDK_SEED=${WDK_SEED}
+    networks:
+      - kuvarpay-network
+    depends_on:
+      - apa-agent
+
+  apa-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: apa-agent
+    volumes:
+      # Mount the brain folder as the primary workspace
+      - ./agent-brain:/workspace
+      # Persist configuration and gateway state
+      - ./agent-brain/.openclaw:/home/node/.openclaw
+    environment:
+      - OPENCLAW_WORKDIR=/workspace
+      - OPENCLAW_CONFIG_PATH=/workspace/openclaw.json
+      # Pass keys directly to the container
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - WDK_SEED=${WDK_SEED}
+      - APA_BACKEND_URL=http://apa-backend:3001
+      - NODE_PATH=/usr/local/lib/node_modules
+    ports:
+      - "8000:8000"
+    networks:
+      - kuvarpay-network
+
+networks:
+  kuvarpay-network:
+    driver: bridge

@@ -1,0 +1,14 @@
+{
+    "name": "agent-brain",
+    "version": "1.0.0",
+    "description": "OpenClaw Agent Brain Plugin",
+    "dependencies": {
+        "@sinclair/typebox": "^0.32.15",
+        "@tetherto/wdk": "latest",
+        "axios": "^1.6.0"
+    },
+    "devDependencies": {
+        "@types/node": "^25.3.3",
+        "typescript": "^5.0.0"
+    }
+}

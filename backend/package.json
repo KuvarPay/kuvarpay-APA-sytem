@@ -1,0 +1,42 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --clean",
+    "start": "node dist/index.js",
+    "dev": "tsup src/index.ts --watch --onSuccess \"node dist/index.js\"",
+    "start:worker": "ts-node src/workers/main.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "@fastify/multipart": "^8.3.1",
+    "@tetherto/wdk": "latest",
+    "@tetherto/wdk-wallet-evm": "^1.0.0-beta.8",
+    "@tetherto/wdk-wallet-tron": "^1.0.0-beta.4",
+    "axios": "^1.6.0",
+    "bullmq": "^5.0.0",
+    "dotenv": "^17.2.1",
+    "drizzle-orm": "^0.44.4",
+    "fastify": "^4.24.0",
+    "nodemailer": "^8.0.2",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.16.3",
+    "rayswap-db": "file:../database/rayswap-db",
+    "sodium-universal": "^5.0.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/nodemailer": "^7.0.11",
+    "@types/pg": "^8.11.0",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

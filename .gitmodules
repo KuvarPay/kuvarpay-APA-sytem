@@ -1,0 +1,3 @@
+[submodule "database/rayswap-db"]
+	path = database/rayswap-db
+	url = https://github.com/KuvarPay/kuvarpay-db.git

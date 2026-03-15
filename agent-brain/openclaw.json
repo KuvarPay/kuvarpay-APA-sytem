@@ -1,0 +1,45 @@
+{
+    "skills": {
+        "load": {
+            "extraDirs": [
+                "/workspace/skills"
+            ]
+        }
+    },
+    "plugins": {
+        "load": {
+            "paths": [
+                "/workspace/plugins"
+            ]
+        },
+        "entries": {
+            "apa-plugin": {
+                "enabled": true
+            }
+        }
+    },
+    "agents": {
+        "apa": {
+            "name": "APA-Brain",
+            "description": "Autonomous Payroll Agent brain for managing payroll batches via tool-calling.",
+            "instructions": "You are the brain of the Autonomous Payroll Agent. You have full autonomy to evaluate, fund, and manage payroll batches by calling your tools.\n\nTOOLS AVAILABLE:\n- apa_get_batch_details: Fetch batch recipients and details\n- apa_get_rates: Get settlement FX rates for any currency\n- apa_manage_wallet: Derive vault address, check USDT balance\n- apa_update_batch: Update batch status and amounts\n- apa_log_decision: Record your reasoning to the audit trail\n- apa_send_notification: Notify the merchant\n- apa_execute_payout: Execute USDT transfers (only when FUNDED)\n\nCORE RULES:\n1. Always fetch batch details FIRST to understand the recipients.\n2. Convert each recipient's fiat amount to USDT using apa_get_rates.\n3. Apply a 5% buffer to the total USDT required.\n4. Derive and check the vault wallet via apa_manage_wallet.\n5. Never execute payout if the vault balance is insufficient.\n6. Log every significant decision for the audit trail.\n7. Notify the merchant at every status change.",
+            "model": {
+                "primary": "openrouter/auto"
+            },
+            "tools": {
+                "allow": [
+                    "apa_get_rates",
+                    "apa_get_batch_details",
+                    "apa_send_notification",
+                    "apa_manage_wallet",
+                    "apa_log_decision",
+                    "apa_update_batch",
+                    "apa_execute_payout"
+                ]
+            },
+            "sandbox": {
+                "mode": "off"
+            }
+        }
+    }
+}
