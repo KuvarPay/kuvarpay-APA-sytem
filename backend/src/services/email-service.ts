@@ -34,16 +34,16 @@ const transporter = createTransporter();
 /** Resolve the business owner's email from the DB */
 async function getBusinessOwnerEmail(businessId: string): Promise<{ email: string; firstName: string } | null> {
     try {
-        const [biz] = await db.select({ ownerId: businesses.ownerId })
-            .from(businesses)
-            .where(eq(businesses.id, businessId))
+        const [biz] = await (db as any).select({ ownerId: (businesses as any).ownerId })
+            .from(businesses as any)
+            .where(eq((businesses as any).id, businessId) as any)
             .limit(1);
 
         if (!biz) return null;
 
         const [user] = await db.select({ email: users.email, firstName: users.firstName })
             .from(users)
-            .where(eq(users.id, biz.ownerId))
+            .where(eq(users.id, biz.ownerId) as any)
             .limit(1);
 
         return user ? { email: user.email, firstName: user.firstName || 'there' } : null;

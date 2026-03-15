@@ -1,0 +1,1 @@
+ALTER TYPE "public"."NotificationPriority" ADD VALUE 'MEDIUM' BEFORE 'HIGH';

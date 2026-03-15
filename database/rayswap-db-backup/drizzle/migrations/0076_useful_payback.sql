@@ -1,0 +1,1 @@
+ALTER TABLE "businesses" ADD COLUMN "director_declaration" jsonb;

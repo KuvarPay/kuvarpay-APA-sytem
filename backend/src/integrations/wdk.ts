@@ -62,7 +62,7 @@ export class WdkService {
     async getBatchAddress(index: number, network: string = 'bsc'): Promise<string> {
         const wdkNetwork = this.toWdkNetwork(network);
         const account = await this.wdk.getAccount(wdkNetwork, index);
-        return account.address;
+        return account.address || (account as any).__address;
     }
 
     /**

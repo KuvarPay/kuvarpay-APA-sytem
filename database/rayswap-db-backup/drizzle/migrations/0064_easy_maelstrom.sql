@@ -1,0 +1,1 @@
+ALTER TABLE "marketing_triggers" ADD COLUMN "content_type" text DEFAULT 'html' NOT NULL;

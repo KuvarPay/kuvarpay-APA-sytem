@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "settlement_accounts_bank_unique" ON "settlement_accounts" USING btree ("business_id" text_ops,"account_number" text_ops,"bank_code" text_ops,"currency" text_ops) WHERE type = 'BANK_TRANSFER' AND is_active = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "settlement_accounts_mobile_unique" ON "settlement_accounts" USING btree ("business_id" text_ops,"phone_number" text_ops,"mobile_network_code" text_ops,"currency" text_ops) WHERE type = 'MOBILE_MONEY' AND is_active = true;

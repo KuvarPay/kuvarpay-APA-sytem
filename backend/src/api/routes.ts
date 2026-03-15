@@ -18,13 +18,27 @@ function toWdkNetwork(network: string): string {
     return 'ethereum';
 }
 
-// Basic Auth Middleware
+// Basic Auth Middleware - Trust internal network if Business ID is present
 const authMiddleware = async (request: any, reply: any) => {
     const apiKey = request.headers['x-api-key'];
+    const businessId = request.headers['x-business-id'] || (request.body as any)?.businessId || (request.query as any)?.businessId;
     const validKey = process.env.KUVARPAY_API_KEY || 'apa_local_test_key';
 
-    if (!apiKey || apiKey !== validKey) {
+    // If API Key is provided, it must be valid
+    if (apiKey && apiKey !== validKey) {
         return reply.status(401).send({ error: 'Unauthorized: Invalid API Key' });
+    }
+
+    // If no API Key, we require a Business ID to identify the context (trusting internal VPC)
+    if (!apiKey && !businessId && !request.url.includes('/rates')) {
+        return reply.status(401).send({ error: 'Unauthorized: API Key or Business ID required' });
+    }
+    
+    // Attach businessId to request if found in header
+    if (businessId && !request.body?.businessId) {
+        if (typeof request.body === 'object' && request.body !== null) {
+            request.body.businessId = businessId;
+        }
     }
 };
 

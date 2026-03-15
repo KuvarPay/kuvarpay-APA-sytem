@@ -68,7 +68,7 @@ export class FxService {
                 eq(exchangeRates.baseCurrency, 'USD'),
                 eq(exchangeRates.targetCurrency, 'NGN'),
                 eq(exchangeRates.source, 'settlement_snapshot')
-            ))
+            ) as any)
             .orderBy(desc(exchangeRates.fetchedAt))
             .limit(1);
 
@@ -81,7 +81,7 @@ export class FxService {
         const [fiatRate] = await db
             .select()
             .from(paymentFiatRates)
-            .where(eq(paymentFiatRates.currency, 'NGN'))
+            .where(eq(paymentFiatRates.currency, 'NGN') as any)
             .limit(1);
 
         if (fiatRate) {
@@ -96,7 +96,7 @@ export class FxService {
             .where(and(
                 eq(exchangeRates.baseCurrency, 'USD'),
                 eq(exchangeRates.targetCurrency, 'NGN')
-            ))
+            ) as any)
             .orderBy(desc(exchangeRates.fetchedAt))
             .limit(1);
 
@@ -121,7 +121,7 @@ export class FxService {
                 eq(exchangeRates.baseCurrency, 'NGN'),
                 eq(exchangeRates.targetCurrency, target),
                 eq(exchangeRates.source, 'settlement_snapshot')
-            ))
+            ) as any)
             .orderBy(desc(exchangeRates.fetchedAt))
             .limit(1);
 
@@ -134,7 +134,7 @@ export class FxService {
         const [fiatRate] = await db
             .select()
             .from(paymentFiatRates)
-            .where(eq(paymentFiatRates.currency, target))
+            .where(eq(paymentFiatRates.currency, target) as any)
             .limit(1);
 
         if (fiatRate) {

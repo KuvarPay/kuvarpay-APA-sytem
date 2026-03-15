@@ -1,0 +1,111 @@
+name: Migrate Production Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_destructive:
+        description: 'Allow destructive migrations (DROP, TRUNCATE, ALTER TYPE)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  migrate-production:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify DATABASE_URL_PROD secret
+        run: |
+          if [ -z "${{ secrets.DATABASE_URL_PROD }}" ]; then
+            echo "❌ DATABASE_URL_PROD secret is required for production migrations."
+            echo "Please configure the secret in repository settings."
+            exit 1
+          else
+            echo "✅ DATABASE_URL_PROD secret found."
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan for destructive migrations
+        id: scan-migrations
+        run: |
+          echo "🔍 Scanning SQL migrations for destructive commands..."
+          echo "Allow destructive: ${{ inputs.allow_destructive }}"
+          
+          # Get changed files in migrations directory
+          CHANGED_MIGRATIONS=$(git diff --name-only HEAD~1 HEAD -- 'drizzle/migrations/*.sql' || echo "")
+          
+          if [ -z "$CHANGED_MIGRATIONS" ]; then
+            echo "No SQL migration changes detected."
+            exit 0
+          fi
+          
+          echo "Changed migrations: $CHANGED_MIGRATIONS"
+          
+          # Check for destructive commands
+          DESTRUCTIVE_PATTERNS="DROP|TRUNCATE|ALTER TYPE"
+          DESTRUCTIVE_FOUND=false
+          DESTRUCTIVE_FILES=""
+          
+          for file in $CHANGED_MIGRATIONS; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              if grep -iE "$DESTRUCTIVE_PATTERNS" "$file"; then
+                echo "⚠️ Destructive command found in $file"
+                DESTRUCTIVE_FOUND=true
+                DESTRUCTIVE_FILES="$DESTRUCTIVE_FILES $file"
+              fi
+            fi
+          done
+          
+          if [ "$DESTRUCTIVE_FOUND" = true ]; then
+            if [ "${{ inputs.allow_destructive }}" = "true" ]; then
+              echo "✅ Destructive commands found but allow_destructive is true. Proceeding with caution."
+              echo "Files with destructive commands:$DESTRUCTIVE_FILES"
+            else
+              echo "❌ DESTRUCTIVE COMMANDS DETECTED IN PRODUCTION MIGRATIONS"
+              echo "Files with destructive commands:$DESTRUCTIVE_FILES"
+              echo ""
+              echo "Destructive commands include: DROP, TRUNCATE, ALTER TYPE"
+              echo "These operations can cause irreversible data loss in production."
+              echo ""
+              echo "To proceed anyway, re-run this workflow with 'allow_destructive' set to true."
+              echo "⚠️ WARNING: Only do this if you are absolutely certain about the changes."
+              exit 1
+            fi
+          else
+            echo "✅ No destructive commands found. Safe to proceed."
+          fi
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+        run: |
+          echo "🚀 Running production database migrations..."
+          echo "⚠️ This will modify the production database."
+          npm run db:migrate
+          echo "✅ Production migrations completed successfully."
+
+      - name: Migration summary
+        if: always()
+        run: |
+          echo "📊 Production Migration Summary"
+          echo "================================"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Allow destructive: ${{ inputs.allow_destructive }}"
+          echo "Status: ${{ job.status }}"
