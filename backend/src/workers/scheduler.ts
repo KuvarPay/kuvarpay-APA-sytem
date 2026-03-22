@@ -228,6 +228,10 @@ ${agentPrompt ? `- User Instructions: ${agentPrompt}` : ''}`;
 
                             // Safety flush: if no sentence boundary arrives within 2s, emit what we have
                             flushTimer = setTimeout(flushTextBuffer, 2000);
+                        } else if ((event.type === 'response.thought.delta' || event.type === 'response.thinking.delta' || event.type === 'response.output_thinking.delta') && event.delta) {
+                            // Track activity to prevent timeouts
+                            // Optionally stream thought to logs
+                            console.log(`[OpenClaw] 💭 Thought: ${event.delta}`);
                         } else {
                             // Delegate non-delta events to the handler
                             handleSSEEvent(event, scheduleId, batchId);
@@ -326,7 +330,22 @@ function handleSSEEvent(event: any, scheduleId: string, batchId: string | null) 
             break;
 
         case 'response.failed':
-            console.error(`[OpenClaw] ❌ Response failed:`, event.response?.status_details);
+            const errMsg = event.response?.status_details?.error?.message || event.error?.message || 'Agent run failed';
+            const code = event.response?.status_details?.error?.code || 'TIMEOUT_OR_PROTOCOL_ERROR';
+            console.error(`[OpenClaw] ❌ Agent Failed (${code}):`, errMsg);
+            emitThought({
+                scheduleId,
+                batchId: batchId || undefined,
+                type: 'ERROR',
+                message: `The agent encountered a critical processing error: ${errMsg}`
+            });
+            break;
+
+        case 'response.done':
+            if (event.response?.usage) {
+                const { total_tokens, input_tokens, output_tokens } = event.response.usage;
+                console.log(`[OpenClaw] 📊 Usage: ${total_tokens} tokens (In: ${input_tokens}, Out: ${output_tokens})`);
+            }
             break;
 
         default:
@@ -432,12 +451,115 @@ export async function startSweepCron() {
                     .limit(1);
 
                 if (existingBatches.length === 0) {
-                    console.log(`[SweepCron] 🆕 Vault ready. Auto-creating first batch for ONE_TIME schedule: ${schedule.id}`);
+                    // Use a transaction for the entire batch creation process to avoid race conditions
+                    await db.transaction(async (tx) => {
+                        // Double-check inside transaction if a batch already exists
+                        const [reallyNoBatches] = await tx.select().from(payrollBatches)
+                            .where(eq(payrollBatches.scheduleId, schedule.id) as any)
+                            .limit(1);
+                        
+                        if (reallyNoBatches) return;
+
+                        console.log(`[SweepCron] 🆕 Vault ready. Auto-creating first batch for ONE_TIME schedule: ${schedule.id}`);
+                        
+                        const batchId = uuidv4();
+                        
+                        // Fetch full recipient details to populate the batch properly
+                        const links = await tx.select({
+                            staffId: schema.scheduleRecipients.staffId,
+                            recipientId: schema.scheduleRecipients.recipientId,
+                            amountOverride: schema.scheduleRecipients.amountOverride,
+                            staffSalary: schema.staffDirectory.basicSalary,
+                            staffAllowances: schema.staffDirectory.allowances,
+                            staffDeductions: schema.staffDirectory.deductions,
+                            staffCurrency: schema.staffDirectory.currency,
+                            recipientAmount: schema.recipientDirectory.amount,
+                            recipientCurrency: schema.recipientDirectory.currency,
+                            staffName: schema.staffDirectory.name,
+                            recipientName: schema.recipientDirectory.name,
+                        })
+                        .from(schema.scheduleRecipients)
+                        // @ts-ignore
+                        .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
+                        // @ts-ignore
+                        .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
+                        .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
+
+                        let totalFiat = 0;
+                        const recipientsForBatch = links.map(l => {
+                            const isStaff = !!l.staffId;
+                            let amount = 0;
+                            let currency = "NGN";
+                            
+                            if (isStaff) {
+                                amount = Number(l.staffSalary || 0) + Number(l.staffAllowances || 0) - Number(l.staffDeductions || 0);
+                                currency = l.staffCurrency || "NGN";
+                            } else {
+                                amount = Number(l.recipientAmount || 0);
+                                currency = l.recipientCurrency || "NGN";
+                            }
+
+                            const finalAmount = l.amountOverride && Number(l.amountOverride) > 0 ? Number(l.amountOverride) : amount;
+                            totalFiat += finalAmount;
+
+                            return {
+                                id: isStaff ? l.staffId : l.recipientId,
+                                name: isStaff ? l.staffName : l.recipientName,
+                                amount: String(finalAmount),
+                                currency,
+                                type: isStaff ? 'STAFF' : 'VENDOR'
+                            };
+                        });
+
+                        // Extract estimate from metadata if agent saved it during pre-evaluation
+                        const metadata = (schedule.metadata as any) || {};
+                        const estimatedUsdt = String(metadata.estimatedUsdt || "0");
+
+                        await tx.insert(payrollBatches).values({
+                            id: batchId,
+                            scheduleId: schedule.id,
+                            status: 'PENDING',
+                            totalAmountFiat: String(totalFiat),
+                            totalAmountUsdt: estimatedUsdt,
+                            currency: schedule.category === 'SALARY' ? 'NGN' : 'GHS',
+                            recipientCount: recipientsForBatch.length,
+                            recipients: recipientsForBatch, 
+                            updatedAt: new Date().toISOString()
+                        });
+
+                        // Kickoff the agent evaluation (outside the tx is safer for BullMQ but after is fine if we return)
+                        await payrollQueue.add('PROCESS_BATCH', {
+                            scheduleId: schedule.id,
+                            batchId,
+                            type: 'EVALUATE_FUNDING'
+                        });
+                    });
+                }
+            }
+
+            // 2. Handle RECURRING schedules based on nextRunAt logic
+            const now = new Date();
+            const recurringSchedules = await db.select().from(payrollSchedules)
+                .where(
+                    and(
+                        eq(payrollSchedules.timing, 'RECURRING') as any,
+                        sql`${payrollSchedules.nextRunAt} <= ${now.toISOString()}` as any,
+                        sql`${payrollSchedules.vaultAddress} != 'pending'` as any
+                    )
+                );
+
+            for (const schedule of recurringSchedules) {
+                await db.transaction(async (tx) => {
+                    // Double check nextRunAt inside transaction (optimistic locking would be better but this handles simple races)
+                    const [latest] = await tx.select().from(payrollSchedules).where(eq(payrollSchedules.id, schedule.id) as any).limit(1);
+                    if (!latest || !latest.nextRunAt || new Date(latest.nextRunAt) > now) return;
+
+                    console.log(`[SweepCron] 🔄 Vault ready. Auto-creating recurring batch for schedule: ${schedule.id}`);
                     
                     const batchId = uuidv4();
                     
                     // Fetch full recipient details to populate the batch properly
-                    const links = await db.select({
+                    const links = await tx.select({
                         staffId: schema.scheduleRecipients.staffId,
                         recipientId: schema.scheduleRecipients.recipientId,
                         amountOverride: schema.scheduleRecipients.amountOverride,
@@ -483,11 +605,11 @@ export async function startSweepCron() {
                         };
                     });
 
-                    // Extract estimate from metadata if agent saved it during pre-evaluation
+                    // For recurring, we might rely on the agent to recalculate FX or use last known estimate
                     const metadata = (schedule.metadata as any) || {};
                     const estimatedUsdt = String(metadata.estimatedUsdt || "0");
 
-                    await db.insert(payrollBatches).values({
+                    await tx.insert(payrollBatches).values({
                         id: batchId,
                         scheduleId: schedule.id,
                         status: 'PENDING',
@@ -499,114 +621,27 @@ export async function startSweepCron() {
                         updatedAt: new Date().toISOString()
                     });
 
+                    // Calculate next increment
+                    const nextDate = new Date(schedule.nextRunAt!);
+                    const freq = schedule.cronExpression?.toLowerCase() || 'monthly';
+                    
+                    if (freq === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
+                    else if (freq === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
+                    else nextDate.setMonth(nextDate.getMonth() + 1); // Default to monthly
+
+                    await tx.update(payrollSchedules)
+                        .set({ 
+                            nextRunAt: nextDate.toISOString(),
+                            updatedAt: new Date().toISOString()
+                        })
+                        .where(eq(payrollSchedules.id, schedule.id) as any);
+
                     // Kickoff the agent evaluation
                     await payrollQueue.add('PROCESS_BATCH', {
                         scheduleId: schedule.id,
                         batchId,
                         type: 'EVALUATE_FUNDING'
                     });
-                }
-            }
-
-            // 2. Handle RECURRING schedules based on nextRunAt logic
-            const now = new Date();
-            const recurringSchedules = await db.select().from(payrollSchedules)
-                .where(
-                    and(
-                        eq(payrollSchedules.timing, 'RECURRING') as any,
-                        sql`${payrollSchedules.nextRunAt} <= ${now.toISOString()}` as any,
-                        sql`${payrollSchedules.vaultAddress} != 'pending'` as any
-                    )
-                );
-
-            for (const schedule of recurringSchedules) {
-                console.log(`[SweepCron] 🔄 Vault ready. Auto-creating recurring batch for schedule: ${schedule.id}`);
-                
-                const batchId = uuidv4();
-                
-                // Fetch full recipient details to populate the batch properly
-                const links = await db.select({
-                    staffId: schema.scheduleRecipients.staffId,
-                    recipientId: schema.scheduleRecipients.recipientId,
-                    amountOverride: schema.scheduleRecipients.amountOverride,
-                    staffSalary: schema.staffDirectory.basicSalary,
-                    staffAllowances: schema.staffDirectory.allowances,
-                    staffDeductions: schema.staffDirectory.deductions,
-                    staffCurrency: schema.staffDirectory.currency,
-                    recipientAmount: schema.recipientDirectory.amount,
-                    recipientCurrency: schema.recipientDirectory.currency,
-                    staffName: schema.staffDirectory.name,
-                    recipientName: schema.recipientDirectory.name,
-                })
-                .from(schema.scheduleRecipients)
-                // @ts-ignore
-                .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
-                // @ts-ignore
-                .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
-                .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
-
-                let totalFiat = 0;
-                const recipientsForBatch = links.map(l => {
-                    const isStaff = !!l.staffId;
-                    let amount = 0;
-                    let currency = "NGN";
-                    
-                    if (isStaff) {
-                        amount = Number(l.staffSalary || 0) + Number(l.staffAllowances || 0) - Number(l.staffDeductions || 0);
-                        currency = l.staffCurrency || "NGN";
-                    } else {
-                        amount = Number(l.recipientAmount || 0);
-                        currency = l.recipientCurrency || "NGN";
-                    }
-
-                    const finalAmount = l.amountOverride && Number(l.amountOverride) > 0 ? Number(l.amountOverride) : amount;
-                    totalFiat += finalAmount;
-
-                    return {
-                        id: isStaff ? l.staffId : l.recipientId,
-                        name: isStaff ? l.staffName : l.recipientName,
-                        amount: String(finalAmount),
-                        currency,
-                        type: isStaff ? 'STAFF' : 'VENDOR'
-                    };
-                });
-
-                // For recurring, we might rely on the agent to recalculate FX or use last known estimate
-                const metadata = (schedule.metadata as any) || {};
-                const estimatedUsdt = String(metadata.estimatedUsdt || "0");
-
-                await db.insert(payrollBatches).values({
-                    id: batchId,
-                    scheduleId: schedule.id,
-                    status: 'PENDING',
-                    totalAmountFiat: String(totalFiat),
-                    totalAmountUsdt: estimatedUsdt,
-                    currency: schedule.category === 'SALARY' ? 'NGN' : 'GHS',
-                    recipientCount: recipientsForBatch.length,
-                    recipients: recipientsForBatch, 
-                    updatedAt: new Date().toISOString()
-                });
-
-                // Calculate next increment
-                const nextDate = new Date(schedule.nextRunAt!);
-                const freq = schedule.cronExpression?.toLowerCase() || 'monthly';
-                
-                if (freq === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
-                else if (freq === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
-                else nextDate.setMonth(nextDate.getMonth() + 1); // Default to monthly
-
-                await db.update(payrollSchedules)
-                    .set({ 
-                        nextRunAt: nextDate.toISOString(),
-                        updatedAt: new Date().toISOString()
-                    })
-                    .where(eq(payrollSchedules.id, schedule.id) as any);
-
-                // Kickoff the agent evaluation
-                await payrollQueue.add('PROCESS_BATCH', {
-                    scheduleId: schedule.id,
-                    batchId,
-                    type: 'EVALUATE_FUNDING'
                 });
             }
 
@@ -619,6 +654,6 @@ export async function startSweepCron() {
     setInterval(sweep, 10000);
 }
 
-// Start the autonomous sweep monitoring
-startSweepCron();
+// Monitors are now started by main.ts or index.ts explicitly
+// To avoid double-starting when imported, we don't call them globally here.
 

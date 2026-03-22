@@ -56,13 +56,7 @@ services:
     container_name: apa-agent
     user: root
     command: >
-      sh -c "
-      mkdir -p /root/.openclaw/extensions &&
-      cp -r /workspace/plugins/* /root/.openclaw/extensions/ &&
-      cp /workspace/openclaw.json /root/.openclaw/openclaw.json &&
-      chown -R root:root /root/.openclaw/extensions &&
-      openclaw gateway run --port 8000
-      "
+      sh -c " mkdir -p /root/.openclaw/extensions && cp -r /workspace/plugins/* /root/.openclaw/extensions/ && cp /workspace/openclaw.json /root/.openclaw/openclaw.json && chown -R root:root /root/.openclaw/extensions && openclaw gateway run --port 8000 "
     volumes:
       - ./agent-brain:/workspace
       - openclaw-data:/root/.openclaw
@@ -94,7 +88,7 @@ services:
     networks:
       - kuvarpay-network
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: [ "CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -102,6 +96,7 @@ services:
 
 volumes:
   openclaw-data:
+
 
 networks:
   kuvarpay-network:

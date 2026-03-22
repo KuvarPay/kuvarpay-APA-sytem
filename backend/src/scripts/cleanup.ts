@@ -18,29 +18,22 @@ const {
 } = schema;
 
 async function cleanup() {
-    console.log('🧹 Cleaning up payroll tables...');
-    
-    // The specific schedule ID from the logs
-    const scheduleId = '467ea793-dcb1-4e0f-b931-08f9555e4228';
+    console.log('🧹 Cleaning up ALL payroll tables (Wiping everything)...');
     
     try {
-        console.log(`🗑️ Deleting recipients linked to schedule ${scheduleId}...`);
-        await db.delete(scheduleRecipients).where(eq(scheduleRecipients.scheduleId, scheduleId));
+        console.log('🗑️ Clearing schedule recipients...');
+        await db.delete(scheduleRecipients);
         
-        console.log(`🗑️ Deleting decisions linked to schedule ${scheduleId}...`);
-        await db.delete(payrollAgentDecisions).where(eq(payrollAgentDecisions.scheduleId, scheduleId));
+        console.log('🗑️ Clearing agent decisions...');
+        await db.delete(payrollAgentDecisions);
         
-        console.log(`🗑️ Deleting all batches linked to schedule ${scheduleId}...`);
-        await db.delete(payrollBatches).where(eq(payrollBatches.scheduleId, scheduleId));
+        console.log('🗑️ Clearing all batches...');
+        await db.delete(payrollBatches);
         
-        console.log(`🗑️ Deleting schedule ${scheduleId}...`);
-        await db.delete(payrollSchedules).where(eq(payrollSchedules.id, scheduleId));
+        console.log('🗑️ Clearing all schedules...');
+        await db.delete(payrollSchedules);
         
-        console.log('✅ Specific Cleanup successful.');
-        
-        // Final sanity check: Total active schedules remaining
-        const remaining = await db.select().from(payrollSchedules);
-        console.log(`📊 Current payroll schedules count: ${remaining.length}`);
+        console.log('✅ DATABASE WIPED: All payroll data has been deleted.');
         
         process.exit(0);
     } catch (err) {

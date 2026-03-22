@@ -6,7 +6,14 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openrouter/google/gemini-2.5-flash-lite"
+        "primary": "openrouter/stepfun/step-3.5-flash:free",
+        "fallbacks": [
+          "openrouter/stepfun/step-3.5-flash",
+          "openrouter/google/gemini-2.5-flash-lite",
+          "openrouter/minimax/minimax-m2.5",
+          "openrouter/openai/gpt-oss-120b",
+          "openrouter/openai/gpt-4o-mini"
+        ]
       },
       "timeoutSeconds": 300,
       "workspace": "/workspace",
@@ -24,7 +31,16 @@
         "name": "APA-Brain-Agent",
         "workspace": "/workspace",
         "agentDir": "/workspace/.openclaw/agents/main",
-        "model": "openrouter/google/gemini-2.5-flash-lite",
+        "model": {
+          "primary": "openrouter/stepfun/step-3.5-flash:free",
+          "fallbacks": [
+            "openrouter/stepfun/step-3.5-flash",
+            "openrouter/google/gemini-2.5-flash-lite",
+            "openrouter/minimax/minimax-m2.5",
+            "openrouter/openai/gpt-oss-120b",
+            "openrouter/openai/gpt-4o-mini"
+          ]
+        },
         "identity": {
           "name": "APA-Brain",
           "theme": "Autonomous Payroll Agent",
