@@ -2,3 +2,4 @@
 .env
 dist/
 upload-secrets.sh
+secrets.env

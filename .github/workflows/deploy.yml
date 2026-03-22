@@ -19,8 +19,9 @@ jobs:
         uses: appleboy/ssh-action@master
         env:
           ENV_FILE_APA_PROD: ${{ secrets.ENV_FILE_APA_PROD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          envs: ENV_FILE_APA_PROD
+          envs: ENV_FILE_APA_PROD,GITHUB_TOKEN
           host: 77.42.23.20
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
@@ -36,7 +37,7 @@ jobs:
               cd "$DEPLOY_DIR"
               # Assuming the repo name matches the subfolder if it's a monorepo, 
               # but here it seems to be the APA repo.
-              git clone https://github.com/KuvarPay/kuvarpay-APA-sytem.git .
+              git clone https://x-access-token:$GITHUB_TOKEN@github.com/KuvarPay/kuvarpay-APA-sytem.git .
             else
               cd "$DEPLOY_DIR"
             fi
@@ -48,6 +49,7 @@ jobs:
             echo "📥 Fetching latest code"
             git reset --hard
             git fetch --all --prune
+            git remote set-url origin https://x-access-token:$GITHUB_TOKEN@github.com/KuvarPay/kuvarpay-APA-sytem.git
             git pull origin main
 
             echo "🔄 Syncing and updating submodules"
