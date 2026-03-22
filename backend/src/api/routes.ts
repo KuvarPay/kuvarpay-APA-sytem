@@ -574,6 +574,33 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     });
 
     /**
+     * Update a single recipient status/metadata in a batch.
+     * Prevents race conditions when multiple recipients are processed in parallel.
+     */
+    fastify.patch('/batches/:id/recipients/:index', async (request, reply) => {
+        const { id, index } = request.params as any;
+        const body = request.body as any;
+        const idx = parseInt(index);
+
+        return await db.transaction(async (tx) => {
+            const [batch] = await tx.select().from(payrollBatches).where(eq(payrollBatches.id, id) as any).limit(1);
+            if (!batch) return reply.status(404).send({ error: 'Batch not found' });
+            
+            const recipients = [...(batch.recipients as any[])];
+            if (recipients[idx]) {
+                recipients[idx] = { ...recipients[idx], ...body };
+            }
+            
+            await tx.update(payrollBatches)
+                .set({ recipients, updatedAt: new Date().toISOString() })
+                .where(eq(payrollBatches.id, id) as any);
+                
+            return { success: true };
+        });
+    });
+
+
+    /**
      * Specialized Decision Log for the Agent's audit trail.
      */
     fastify.post('/agent/decision', async (request, reply) => {

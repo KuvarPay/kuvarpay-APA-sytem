@@ -342,9 +342,10 @@ export default function (api: any) {
                 try {
                     if (isSimulation) {
                         const ref = `sim_${Math.random().toString(36).substring(7)}`;
-                        r.status = 'COMPLETED';
-                        r.reference = ref;
-                        await http.patch(`/batches/${params.batchId}`, { recipients });
+                        await http.patch(`/batches/${params.batchId}/recipients/${params.recipientIndex}`, { 
+                            status: 'COMPLETED', 
+                            reference: ref 
+                        });
                         return { content: [{ type: "text", text: `SIMULATION: Transfer to ${r.name} successful. Ref: ${ref}` }] };
                     }
 
@@ -371,17 +372,22 @@ export default function (api: any) {
                     });
 
                     const success = response.data.success;
-                    r.status = success ? 'COMPLETED' : 'FAILED';
-                    r.transferId = response.data.data?.id || response.data.data?.reference || '';
-                    r.reference = payload.reference;
+                    const transferId = response.data.data?.id || response.data.data?.reference || '';
+                    const reference = payload.reference;
 
-                    await http.patch(`/batches/${params.batchId}`, { recipients });
-                    return { content: [{ type: "text", text: `Transfer to ${r.name} ${success ? 'Successful' : 'Failed'}. ID: ${r.transferId}` }] };
+                    await http.patch(`/batches/${params.batchId}/recipients/${params.recipientIndex}`, { 
+                        status: success ? 'COMPLETED' : 'FAILED',
+                        transferId: transferId,
+                        reference: reference
+                    });
+                    return { content: [{ type: "text", text: `Transfer to ${r.name} ${success ? 'Successful' : 'Failed'}. ID: ${transferId}` }] };
                 } catch (e: any) {
-                    r.status = 'FAILED';
-                    r.errorLog = e.response?.data?.message || e.message;
-                    await http.patch(`/batches/${params.batchId}`, { recipients });
-                    return { content: [{ type: "text", text: `Error: ${r.errorLog}` }], isError: true };
+                    const errorLog = e.response?.data?.message || e.message;
+                    await http.patch(`/batches/${params.batchId}/recipients/${params.recipientIndex}`, { 
+                        status: 'FAILED',
+                        errorLog: errorLog
+                    });
+                    return { content: [{ type: "text", text: `Error: ${errorLog}` }], isError: true };
                 }
             } catch (error: any) {
                 return { content: [{ type: "text", text: `Execution failed: ${error.message}` }], isError: true };
@@ -408,8 +414,9 @@ export default function (api: any) {
                 if (!r) throw new Error("Recipient not found.");
 
                 if (isSimulation) {
-                    r.status = 'COMPLETED';
-                    await http.patch(`/batches/${params.batchId}`, { recipients });
+                    await http.patch(`/batches/${params.batchId}/recipients/${params.recipientIndex}`, { 
+                        status: 'COMPLETED' 
+                    });
                     return { content: [{ type: "text", text: `SIMULATION: USDT Payout of ${r.amount} to ${r.accountNumber} on ${params.network} successful.` }] };
                 }
 
@@ -428,9 +435,10 @@ export default function (api: any) {
                     amount: r.amount
                 });
                 
-                r.status = 'COMPLETED';
-                r.transferId = tx.hash;
-                await http.patch(`/batches/${params.batchId}`, { recipients });
+                await http.patch(`/batches/${params.batchId}/recipients/${params.recipientIndex}`, { 
+                    status: 'COMPLETED',
+                    transferId: tx.hash
+                });
                 
                 account.dispose();
                 return { content: [{ type: "text", text: `Payout successful. Hash: ${tx.hash}` }] };
