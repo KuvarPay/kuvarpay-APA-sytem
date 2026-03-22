@@ -113,10 +113,10 @@ function toolCallMessage(fnName: string): string {
 
 // ─── Send request to OpenClaw Gateway's /v1/responses endpoint with SSE streaming ──
 async function runAgentViaOpenClaw(
-    batchId: string | null, 
-    scheduleId: string, 
-    jobType: string, 
-    network: string, 
+    batchId: string | null,
+    scheduleId: string,
+    jobType: string,
+    network: string,
     agentPrompt?: string
 ): Promise<string> {
     const isExecution = jobType === 'EXECUTE_PAYOUT';
@@ -135,7 +135,7 @@ async function runAgentViaOpenClaw(
         ? `Funds have been detected! Please execute the payout for:
 - Batch ID: ${batchId}
 - Schedule ID: ${scheduleId}`
-        : isScheduleOnly 
+        : isScheduleOnly
             ? `Please perform a pre-check evaluation for Schedule ID: ${scheduleId}. We need an FX estimate and a Vault address.`
             : `Please evaluate the following for funding requirements:
 - Batch ID: ${batchId}
@@ -364,7 +364,7 @@ function handleSSEEvent(event: any, scheduleId: string, batchId: string | null) 
 // ─── BullMQ Worker — dispatches jobs to OpenClaw ───────────────────────
 export const payrollWorker = new Worker('payroll-processing', async (job: Job) => {
     const { scheduleId, batchId, type, agentPrompt } = job.data;
-    
+
     // Fetch schedule to get the selected network
     const [schedule] = await db.select().from(payrollSchedules).where(eq(payrollSchedules.id, scheduleId));
     const network = schedule?.network || 'bsc';
@@ -433,7 +433,7 @@ export const payrollWorker = new Worker('payroll-processing', async (job: Job) =
 export const emailWorker = new Worker('email-notifications', async (job: Job) => {
     const { businessId, type, message, batchId, vaultAddress } = job.data;
     try {
-        const { sendPayrollNotification } = await import('../services/email-service');
+        const { sendPayrollNotification } = await import('../services/email-service.js');
         await sendPayrollNotification(businessId, type, message, batchId, vaultAddress);
         console.log(`[EmailWorker] ✅ Job ${job.id} notification sent for business ${businessId}`);
     } catch (err: any) {
@@ -482,13 +482,13 @@ export async function startSweepCron() {
                         const [reallyNoBatches] = await tx.select().from(payrollBatches)
                             .where(eq(payrollBatches.scheduleId, schedule.id) as any)
                             .limit(1);
-                        
+
                         if (reallyNoBatches) return;
 
                         console.log(`[SweepCron] 🆕 Vault ready. Auto-creating first batch for ONE_TIME schedule: ${schedule.id}`);
-                        
+
                         const batchId = uuidv4();
-                        
+
                         // Fetch full recipient details to populate the batch properly
                         const links = await tx.select({
                             staffId: schema.scheduleRecipients.staffId,
@@ -503,19 +503,19 @@ export async function startSweepCron() {
                             staffName: schema.staffDirectory.name,
                             recipientName: schema.recipientDirectory.name,
                         })
-                        .from(schema.scheduleRecipients)
-                        // @ts-ignore
-                        .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
-                        // @ts-ignore
-                        .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
-                        .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
+                            .from(schema.scheduleRecipients)
+                            // @ts-ignore
+                            .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
+                            // @ts-ignore
+                            .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
+                            .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
 
                         let totalFiat = 0;
                         const recipientsForBatch = links.map(l => {
                             const isStaff = !!l.staffId;
                             let amount = 0;
                             let currency = "NGN";
-                            
+
                             if (isStaff) {
                                 amount = Number(l.staffSalary || 0) + Number(l.staffAllowances || 0) - Number(l.staffDeductions || 0);
                                 currency = l.staffCurrency || "NGN";
@@ -548,7 +548,7 @@ export async function startSweepCron() {
                             totalAmountUsdt: estimatedUsdt,
                             currency: schedule.category === 'SALARY' ? 'NGN' : 'GHS',
                             recipientCount: recipientsForBatch.length,
-                            recipients: recipientsForBatch, 
+                            recipients: recipientsForBatch,
                             updatedAt: new Date().toISOString()
                         });
 
@@ -580,9 +580,9 @@ export async function startSweepCron() {
                     if (!latest || !latest.nextRunAt || new Date(latest.nextRunAt) > now) return;
 
                     console.log(`[SweepCron] 🔄 Vault ready. Auto-creating recurring batch for schedule: ${schedule.id}`);
-                    
+
                     const batchId = uuidv4();
-                    
+
                     // Fetch full recipient details to populate the batch properly
                     const links = await tx.select({
                         staffId: schema.scheduleRecipients.staffId,
@@ -597,19 +597,19 @@ export async function startSweepCron() {
                         staffName: schema.staffDirectory.name,
                         recipientName: schema.recipientDirectory.name,
                     })
-                    .from(schema.scheduleRecipients)
-                    // @ts-ignore
-                    .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
-                    // @ts-ignore
-                    .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
-                    .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
+                        .from(schema.scheduleRecipients)
+                        // @ts-ignore
+                        .leftJoin(schema.staffDirectory, eq(schema.scheduleRecipients.staffId, schema.staffDirectory.id))
+                        // @ts-ignore
+                        .leftJoin(schema.recipientDirectory, eq(schema.scheduleRecipients.recipientId, schema.recipientDirectory.id))
+                        .where(eq(schema.scheduleRecipients.scheduleId, schedule.id) as any);
 
                     let totalFiat = 0;
                     const recipientsForBatch = links.map(l => {
                         const isStaff = !!l.staffId;
                         let amount = 0;
                         let currency = "NGN";
-                        
+
                         if (isStaff) {
                             amount = Number(l.staffSalary || 0) + Number(l.staffAllowances || 0) - Number(l.staffDeductions || 0);
                             currency = l.staffCurrency || "NGN";
@@ -642,20 +642,20 @@ export async function startSweepCron() {
                         totalAmountUsdt: estimatedUsdt,
                         currency: schedule.category === 'SALARY' ? 'NGN' : 'GHS',
                         recipientCount: recipientsForBatch.length,
-                        recipients: recipientsForBatch, 
+                        recipients: recipientsForBatch,
                         updatedAt: new Date().toISOString()
                     });
 
                     // Calculate next increment
                     const nextDate = new Date(schedule.nextRunAt!);
                     const freq = schedule.cronExpression?.toLowerCase() || 'monthly';
-                    
+
                     if (freq === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
                     else if (freq === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
                     else nextDate.setMonth(nextDate.getMonth() + 1); // Default to monthly
 
                     await tx.update(payrollSchedules)
-                        .set({ 
+                        .set({
                             nextRunAt: nextDate.toISOString(),
                             updatedAt: new Date().toISOString()
                         })

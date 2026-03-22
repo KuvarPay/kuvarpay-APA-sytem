@@ -1,4 +1,4 @@
-import { db, schema } from '../../../database/rayswap-db/src/index';
+import { db, schema } from 'rayswap-db';
 import { v4 as uuidv4 } from 'uuid';
 
 const { users, businesses, exchangeRates } = schema;

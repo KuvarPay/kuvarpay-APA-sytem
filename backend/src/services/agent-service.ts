@@ -1,5 +1,4 @@
-import { db, schema } from '../../../database/rayswap-db/src/index';
-import { eq, desc } from 'drizzle-orm';
+import { db, schema, eq, desc } from 'rayswap-db';
 import { WdkService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { FxService } from './fx-service';

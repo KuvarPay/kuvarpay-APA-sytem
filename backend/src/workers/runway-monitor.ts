@@ -1,7 +1,7 @@
 import { db, schema, eq, and, isNull, lt, or } from 'rayswap-db';
 import { sendPayrollNotification } from '../services/email-service';
 
-const { payrollSchedules, payrollBatches, scheduleRecipients, staffDirectory, recipientDirectory, vaultBalances } = schema;
+const { payrollSchedules, payrollBatches, scheduleRecipients, staffDirectory, recipientDirectory } = schema;
 
 /**
  * Background worker to monitor "Runway" for all active schedules.

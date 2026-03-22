@@ -1,5 +1,4 @@
-import { db, schema } from '../../../database/rayswap-db/src/index';
-import { eq, and, desc } from 'drizzle-orm';
+import { db, schema, eq, and, desc } from 'rayswap-db';
 
 const { exchangeRates, paymentFiatRates } = schema;
 

@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer';
-import { db, schema } from '../../../database/rayswap-db/src/index';
-import { eq } from '../../../database/rayswap-db/node_modules/drizzle-orm';
+import { db, schema, eq } from 'rayswap-db';
 
 const { businesses, users, systemSettings } = schema;
 

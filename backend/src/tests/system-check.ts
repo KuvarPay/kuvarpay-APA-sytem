@@ -1,6 +1,4 @@
-import { db, schema } from '../../../database/rayswap-db/src/index';
-// @ts-ignore
-import { eq } from '../../../database/rayswap-db/node_modules/drizzle-orm';
+import { db, schema, eq } from 'rayswap-db';
 import { WdkService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { sendPayrollNotification } from '../services/email-service';

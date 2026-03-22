@@ -643,7 +643,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
                 batchId,
                 decisionType: type,
                 reasoning: message,
-                metadata: { vaultAddress },
+                inputData: { vaultAddress },
                 updatedAt: new Date().toISOString()
             });
         }
