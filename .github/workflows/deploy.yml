@@ -37,7 +37,7 @@ jobs:
               cd "$DEPLOY_DIR"
               # Assuming the repo name matches the subfolder if it's a monorepo, 
               # but here it seems to be the APA repo.
-              git clone https://x-access-token:$GITHUB_TOKEN@github.com/KuvarPay/kuvarpay-APA-sytem.git .
+              git clone git@github.com:KuvarPay/kuvarpay-APA-sytem.git .
             else
               cd "$DEPLOY_DIR"
             fi
