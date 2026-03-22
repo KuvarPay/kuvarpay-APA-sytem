@@ -7,9 +7,6 @@ services:
       dockerfile: backend/Dockerfile
     container_name: apa-backend
     command: npm run start:ts
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://host.docker.internal:6379
@@ -34,9 +31,6 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: apa-worker
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
     command: npm run start:worker
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -60,9 +54,6 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     container_name: apa-agent
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
     user: root
     command: >
       sh -c "
