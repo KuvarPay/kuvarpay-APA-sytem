@@ -3,3 +3,4 @@
 dist/
 upload-secrets.sh
 secrets.env
+/startbutton/
