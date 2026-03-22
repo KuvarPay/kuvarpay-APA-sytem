@@ -11,7 +11,8 @@ export default function (api: any) {
     // Shared axios instance with auth header pre-configured
     const http = axios.create({
         baseURL: `${BACKEND_URL}/api/v1/payroll`,
-        headers: { 'x-api-key': API_KEY }
+        headers: { 'x-api-key': API_KEY },
+        timeout: 30000 // 30s timeout for backend calls
     });
 
     /**

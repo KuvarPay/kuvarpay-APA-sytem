@@ -68,6 +68,7 @@ services:
       sh -c "
       mkdir -p /root/.openclaw/extensions &&
       cp -r /workspace/plugins/* /root/.openclaw/extensions/ &&
+      cp /workspace/openclaw.json /root/.openclaw/openclaw.json &&
       chown -R root:root /root/.openclaw/extensions &&
       npx openclaw gateway run --port 8000
       "
