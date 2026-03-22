@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema, eq, desc, and, sql } from 'rayswap-db';
-import { payrollQueue } from '../workers/scheduler';
+import { payrollQueue, emailQueue } from '../workers/scheduler';
 import { v4 as uuidv4 } from 'uuid';
 import { FxService } from '../services/fx-service';
 import { WdkService } from '../integrations/wdk';
@@ -624,24 +624,31 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     /**
      * Send a notification (email) to the business owner.
      */
-    fastify.post('/notifications', async (request, reply) => {
+    fastify.post('/notifications', async (request) => {
         const { businessId, type, message, batchId, vaultAddress } = request.body as any;
 
-        // Send real email to business owner
-        const { sendPayrollNotification } = await import('../services/email-service.js');
-        const sent = await sendPayrollNotification(businessId, type, message, batchId, vaultAddress);
+        // Push email job to the background queue
+        await emailQueue.add('SEND_PAYROLL', {
+            businessId,
+            type,
+            message,
+            batchId,
+            vaultAddress
+        });
 
+        // Audit the decision if a batch is provided
         if (batchId) {
             await db.insert(payrollAgentDecisions).values({
                 id: uuidv4(),
                 batchId,
-                decisionType: 'NOTIFICATION',
-                reasoning: `Agent sent ${type} notification: ${message} (email ${sent ? 'delivered' : 'skipped'})`,
+                decisionType: type,
+                reasoning: message,
+                metadata: { vaultAddress },
                 updatedAt: new Date().toISOString()
             });
         }
 
-        return { success: true, emailSent: sent };
+        return { success: true, queued: true };
     });
 
     /**

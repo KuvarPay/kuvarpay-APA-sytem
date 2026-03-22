@@ -4,3 +4,4 @@ dist/
 upload-secrets.sh
 secrets.env
 /startbutton/
+backend/src/scripts/cleanup.ts

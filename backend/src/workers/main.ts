@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { payrollWorker, startSweepCron } from './scheduler';
+import { payrollWorker, emailWorker, startSweepCron } from './scheduler';
 import { startFundingMonitor } from './funding-monitor';
 import { startRunwayMonitor } from './runway-monitor';
 
@@ -12,7 +12,15 @@ payrollWorker.on('completed', (job) => {
 });
 
 payrollWorker.on('failed', (job, err) => {
-    console.error(`❌ Job ${job?.id} failed:`, err.message);
+    console.error(`❌ Payroll Job ${job?.id} failed:`, err.message);
+});
+
+emailWorker.on('completed', (job) => {
+    console.log(`✅ Email Job ${job.id} completed`);
+});
+
+emailWorker.on('failed', (job, err) => {
+    console.error(`❌ Email Job ${job?.id} failed:`, err.message);
 });
 
 // Start background monitors

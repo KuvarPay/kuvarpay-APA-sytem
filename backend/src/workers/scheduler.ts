@@ -14,6 +14,10 @@ export const payrollQueue = new Queue('payroll-processing', {
     connection: { url: REDIS_URL }
 });
 
+export const emailQueue = new Queue('email-notifications', {
+    connection: { url: REDIS_URL }
+});
+
 // ─── Wait for OpenClaw agent to be ready (retry up to 60s) ────────────────
 async function waitForAgent(maxWaitMs = 60000): Promise<void> {
     const start = Date.now();
@@ -421,6 +425,27 @@ export const payrollWorker = new Worker('payroll-processing', async (job: Job) =
     }
 }, {
     connection: { url: REDIS_URL }
+});
+
+/**
+ * ─── Email Worker — Processes notifications in the background ──────────
+ */
+export const emailWorker = new Worker('email-notifications', async (job: Job) => {
+    const { businessId, type, message, batchId, vaultAddress } = job.data;
+    try {
+        const { sendPayrollNotification } = await import('../services/email-service');
+        await sendPayrollNotification(businessId, type, message, batchId, vaultAddress);
+        console.log(`[EmailWorker] ✅ Job ${job.id} notification sent for business ${businessId}`);
+    } catch (err: any) {
+        console.error(`[EmailWorker] ❌ Error in notification job ${job.id}:`, err.message);
+        throw err; // BullMQ will handle retries
+    }
+}, {
+    connection: { url: REDIS_URL },
+    limiter: {
+        max: 5,
+        duration: 2000 // 5 emails per 2 seconds to avoid SMTP slamming
+    }
 });
 
 /**
