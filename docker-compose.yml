@@ -70,7 +70,7 @@ services:
       cp -r /workspace/plugins/* /root/.openclaw/extensions/ &&
       cp /workspace/openclaw.json /root/.openclaw/openclaw.json &&
       chown -R root:root /root/.openclaw/extensions &&
-      npx openclaw gateway run --port 8000
+      openclaw gateway run --port 8000
       "
     volumes:
       - ./agent-brain:/workspace
@@ -90,6 +90,13 @@ services:
       - OPENCLAW_ALLOW_INSECURE_PLUGINS=true
       - APA_SIMULATION=${APA_SIMULATION}
       - OPENCLAW_DEV=1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          cpus: '0.3'
+          memory: 512M
     ports:
       - "8000:8000"
     networks:
