@@ -44,7 +44,9 @@ Your mission is to process fiat payouts for a FUNDED payroll batch using Startbu
    - Use 'apa_get_startbutton_balance' to verify the funds have arrived.
 5. Once confirmed:
    - For EACH recipient in the batch recipients list requiring fiat payout (bank or mobile money):
-     - Call 'apa_fiat_transfer' with the 'recipientIndex'.
+     - Call 'apa_fiat_transfer' with the 'batchId' and 'recipientIndex'.
+   - If USDT on-chain payouts are required (STAFF or VENDOR with addresses):
+     - Call 'apa_payout' with the 'batchId' and 'recipientIndex'.
 6. After all transfers, call 'apa_update_batch' to set status to 'COMPLETED'.
 7. Call 'apa_log_decision' (batchId required here) and 'apa_send_notification'.
 

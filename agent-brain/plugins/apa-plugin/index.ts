@@ -220,16 +220,16 @@ export default function (api: any) {
      * Tool to transfer required funds to the Startbutton bridge.
      */
     api.registerTool({
-        name: "apa_transfer_to_bridge",
-        description: "Transfer the calculated total USDT (including buffer) from the Vault to the Startbutton Bridge address (0x0Be508750D2C1736c63a5A1dFf11317F54Eb072c).",
+        name: "apa_deposit_to_startbutton",
+        description: "Transfer the calculated total USDT (including buffer) from the Vault to the Startbutton Bridge address. This must be called before payouts can begin.",
         parameters: Type.Object({
-            amount: Type.String({ description: "The total USDT amount to transfer" }),
+            amountUsdt: Type.String({ description: "The total USDT amount to transfer" }),
             network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' }),
         }),
-        async execute(_id: string, params: { amount: string; network: string }) {
+        async execute(_id: string, params: { amountUsdt: string; network: string }) {
             try {
                 if (isSimulation) {
-                    return { content: [{ type: "text", text: `SIMULATION: Transfer of ${params.amount} USDT to Bridge (0x0Be...) successful. Hash: 0xmock_transfer_hash` }] };
+                    return { content: [{ type: "text", text: `SIMULATION: Transfer of ${params.amountUsdt} USDT to Bridge (0x0Be...) successful. Hash: 0xmock_transfer_hash` }] };
                 }
 
                 const BRIDGE_ADDRESS = "0x0Be508750D2C1736c63a5A1dFf11317F54Eb072c";
@@ -245,7 +245,7 @@ export default function (api: any) {
                 const tx = await account.transfer({
                     token: "USDT",
                     recipient: BRIDGE_ADDRESS,
-                    amount: params.amount
+                    amount: params.amountUsdt
                 });
                 
                 account.dispose();
@@ -260,7 +260,7 @@ export default function (api: any) {
      * Tool to check the balance of the Startbutton bridge.
      */
     api.registerTool({
-        name: "apa_check_bridge_balance",
+        name: "apa_get_startbutton_balance",
         description: "Checks funding status on the bridge address first, then confirms the receipt on Startbutton's dashboard.",
         parameters: Type.Object({
             network: Type.Optional(Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' })),
@@ -276,7 +276,7 @@ export default function (api: any) {
                             text: JSON.stringify({
                                 success: true,
                                 bridgeAddress: BRIDGE_ADDRESS,
-                                bridgeUsdt: "5000.00",
+                                bridgeUsdt: "10000.00",
                                 startbuttonConfirmation: "Successful",
                                 message: "SIMULATION: Funding confirmed on bridge and Startbutton dashboard"
                             }, null, 2)
@@ -320,101 +320,121 @@ export default function (api: any) {
     });
 
     /**
-     * EXECUTION Tool: Executes payout transactions via Startbutton fiat rails.
+     * EXECUTION Tool: Executes fiat transfers via Startbutton API.
      */
     api.registerTool({
-        name: "apa_execute_payout",
-        description: "Execute fiat transfers to recipients via Startbutton API. Bridge funding must be verified before this is called.",
+        name: "apa_fiat_transfer",
+        description: "Execute a fiat transfer to an individual recipient in a batch using Startbutton fiat rails. Bridge funding must be verified before this is called.",
         parameters: Type.Object({
-            batchId: Type.String(),
+            batchId: Type.String({ description: "The ID of the batch" }),
+            recipientIndex: Type.Number({ description: "The index of the recipient to process (0-based)" })
         }),
-        async execute(_id: string, params: { batchId: string }) {
+        async execute(_id: string, params: { batchId: string; recipientIndex: number }) {
             try {
                 const batchResponse = await http.get(`/batches/${params.batchId}`);
                 const { recipients } = batchResponse.data;
 
                 if (!recipients || !Array.isArray(recipients)) throw new Error("No recipients found in batch.");
+                const r = recipients[params.recipientIndex];
+                if (!r) throw new Error(`Recipient at index ${params.recipientIndex} not found in batch.`);
 
-                const results = [];
-
-                for (const r of recipients) {
-                    try {
-                        if (isSimulation) {
-                            const ref = `sim_${Math.random().toString(36).substring(7)}`;
-                            // Mutate recipient in-place so the DB update reflects the real status
-                            r.status = 'COMPLETED';
-                            r.reference = ref;
-                            results.push({
-                                name: r.name,
-                                account: r.accountNumber || r.msisdn,
-                                status: 'COMPLETED',
-                                reference: ref,
-                                success: true
-                            });
-                            continue;
-                        }
-
-                        // Prepare Startbutton Payout Payload
-                        const payload: any = {
-                            amount: r.amount,
-                            currency: r.currency,
-                            country: r.country,
-                            reference: `apa_${params.batchId}_${r.id || Math.random().toString(36).substring(7)}`
-                        };
-
-                        if (r.type === 'MOBILE_MONEY' || r.msisdn) {
-                            payload.MNO = r.bankCode || r.MNO;
-                            payload.msisdn = r.accountNumber || r.msisdn;
-                        } else {
-                            payload.bankCode = r.bankCode;
-                            payload.accountNumber = r.accountNumber;
-                        }
-
-                        const response = await axios.post('https://api.startbutton.tech/transaction/transfer', payload, {
-                            headers: {
-                                'Authorization': `Bearer ${process.env.STARTBUTTON_SECRET_KEY}`,
-                                'Content-Type': 'application/json'
-                            }
-                        });
-
-                        const success = response.data.success;
-                        const transferId = response.data.data?.id || response.data.data?.reference || '';
-                        // Mutate the recipient in-place
-                        r.status = success ? 'COMPLETED' : 'FAILED';
-                        r.transferId = transferId;
-                        r.reference = payload.reference;
-
-                        results.push({
-                            name: r.name,
-                            account: r.accountNumber || r.msisdn,
-                            status: r.status,
-                            transferId,
-                            success
-                        });
-                    } catch (e: any) {
-                        // Mark individual recipient as failed but continue processing others
-                        r.status = 'FAILED';
-                        r.errorLog = e.response?.data?.message || e.message;
-                        results.push({
-                            name: r.name,
-                            account: r.accountNumber || r.msisdn,
-                            error: r.errorLog,
-                            success: false
-                        });
+                try {
+                    if (isSimulation) {
+                        const ref = `sim_${Math.random().toString(36).substring(7)}`;
+                        r.status = 'COMPLETED';
+                        r.reference = ref;
+                        await http.patch(`/batches/${params.batchId}`, { recipients });
+                        return { content: [{ type: "text", text: `SIMULATION: Transfer to ${r.name} successful. Ref: ${ref}` }] };
                     }
+
+                    const payload: any = {
+                        amount: r.amount,
+                        currency: r.currency,
+                        country: r.country,
+                        reference: `apa_${params.batchId}_${r.id || Math.random().toString(36).substring(7)}`
+                    };
+
+                    if (r.type === 'MOBILE_MONEY' || r.msisdn) {
+                        payload.MNO = r.bankCode || r.MNO;
+                        payload.msisdn = r.accountNumber || r.msisdn;
+                    } else {
+                        payload.bankCode = r.bankCode;
+                        payload.accountNumber = r.accountNumber;
+                    }
+
+                    const response = await axios.post('https://api.startbutton.tech/transaction/transfer', payload, {
+                        headers: {
+                            'Authorization': `Bearer ${process.env.STARTBUTTON_SECRET_KEY}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const success = response.data.success;
+                    r.status = success ? 'COMPLETED' : 'FAILED';
+                    r.transferId = response.data.data?.id || response.data.data?.reference || '';
+                    r.reference = payload.reference;
+
+                    await http.patch(`/batches/${params.batchId}`, { recipients });
+                    return { content: [{ type: "text", text: `Transfer to ${r.name} ${success ? 'Successful' : 'Failed'}. ID: ${r.transferId}` }] };
+                } catch (e: any) {
+                    r.status = 'FAILED';
+                    r.errorLog = e.response?.data?.message || e.message;
+                    await http.patch(`/batches/${params.batchId}`, { recipients });
+                    return { content: [{ type: "text", text: `Error: ${r.errorLog}` }], isError: true };
                 }
-
-                // Persist the updated recipients array (with per-recipient statuses) back to the DB
-                await http.patch(`/batches/${params.batchId}`, { recipients });
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify(results, null, 2)
-                    }]
-                };
             } catch (error: any) {
                 return { content: [{ type: "text", text: `Execution failed: ${error.message}` }], isError: true };
+            }
+        }
+    });
+
+    /**
+     * EXECUTION Tool: Executes on-chain USDT payouts.
+     */
+    api.registerTool({
+        name: "apa_payout",
+        description: "Execute an on-chain USDT payout to a recipient's wallet address via the WDK vault.",
+        parameters: Type.Object({
+            batchId: Type.String({ description: "The ID of the batch" }),
+            recipientIndex: Type.Number({ description: "The index of the recipient to process" }),
+            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' }),
+        }),
+        async execute(_id: string, params: { batchId: string; recipientIndex: number; network: string }) {
+            try {
+                const batchResponse = await http.get(`/batches/${params.batchId}`);
+                const { recipients } = batchResponse.data;
+                const r = recipients[params.recipientIndex];
+                if (!r) throw new Error("Recipient not found.");
+
+                if (isSimulation) {
+                    r.status = 'COMPLETED';
+                    await http.patch(`/batches/${params.batchId}`, { recipients });
+                    return { content: [{ type: "text", text: `SIMULATION: USDT Payout of ${r.amount} to ${r.accountNumber} on ${params.network} successful.` }] };
+                }
+
+                const { WDK } = await import('@tetherto/wdk');
+                const { NativeWallet } = await import('@tetherto/wdk-wallet-native');
+                
+                const wdk = new WDK({
+                    wallet: new NativeWallet(process.env.WDK_SEED || ''),
+                    network: params.network as any,
+                });
+
+                const account = await wdk.getAccount(0);
+                const tx = await account.transfer({
+                    token: "USDT",
+                    recipient: r.accountNumber || r.address,
+                    amount: r.amount
+                });
+                
+                r.status = 'COMPLETED';
+                r.transferId = tx.hash;
+                await http.patch(`/batches/${params.batchId}`, { recipients });
+                
+                account.dispose();
+                return { content: [{ type: "text", text: `Payout successful. Hash: ${tx.hash}` }] };
+            } catch (error: any) {
+                return { content: [{ type: "text", text: `Payout failed: ${error.message}` }], isError: true };
             }
         }
     });
