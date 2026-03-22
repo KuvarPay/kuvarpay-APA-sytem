@@ -62,7 +62,6 @@ APA acts as an autonomous treasury and liquidity manager. It decides when to mov
 
 ### **"Builders define the rules → Agents do the work → Value settles onchain"**
 APA is exactly what was envisioned for Hackathon Galáctica. It is not a social experiment. It is **economic infrastructure.**
-
 ---
 *Created for: Hackathon Galáctica: WDK Edition 1*
 *Author: [The KuvarPay Development Team]*
