@@ -2,9 +2,10 @@ import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
+import { db, schema, eq, desc, and, sql } from 'rayswap-db';
 import payrollRoutes from './api/routes';
 import './workers/scheduler'; // Import to initialize worker
-import { startFundingMonitor } from './workers/funding-monitor';
+
 
 
 dotenv.config();
@@ -34,9 +35,10 @@ const start = async () => {
         await fastify.listen({ port, host: '0.0.0.0' });
         console.log(`APA Backend listening on port ${port}`);
         
-        // Start background monitors
-        startFundingMonitor();
+        // Monitors are now managed by the dedicated worker process
+
     } catch (err) {
+        console.error('FATAL STARTUP ERROR:', err);
         fastify.log.error(err);
         process.exit(1);
     }

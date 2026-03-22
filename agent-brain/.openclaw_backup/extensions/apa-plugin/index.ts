@@ -211,9 +211,19 @@ export default function (api: any) {
 
                 const account = await wdk.getAccount(0);
                 const results = [];
+                const isMock = process.env.MOCK_PAYOUT === 'true';
 
                 for (const r of recipients) {
                     try {
+                        if (isMock) {
+                            results.push({ 
+                                name: r.name, 
+                                address: r.address, 
+                                hash: `0xmock_${Math.random().toString(36).substring(7)}`, 
+                                success: true 
+                            });
+                            continue;
+                        }
                         // In a real autonomous run, the agent would have pre-calculated r.amountUsdt
                         const tx = await account.transfer({
                             token: "USDT",
@@ -226,7 +236,7 @@ export default function (api: any) {
                     }
                 }
 
-                account.dispose();
+                if (!isMock) account.dispose();
 
                 return {
                     content: [{

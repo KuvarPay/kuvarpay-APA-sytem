@@ -6,57 +6,101 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: apa-backend
+    command: npm run start:ts
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://host.docker.internal:6379
       - KUVARPAY_API_KEY=${KUVARPAY_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
       - OPENCLAW_URL=http://apa-agent:8000
+      - APA_SIMULATION=${APA_SIMULATION}
+      - WDK_SEED=${WDK_SEED}
     ports:
       - "3001:3001"
     networks:
       - kuvarpay-network
     depends_on:
-      - apa-agent
+      apa-agent:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   apa-worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: apa-worker
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     command: npm run start:worker
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://host.docker.internal:6379
       - WDK_SEED=${WDK_SEED}
+      - APA_SIMULATION=${APA_SIMULATION}
+      - APA_BACKEND_URL=http://apa-backend:3001
+      - KUVARPAY_API_KEY=${KUVARPAY_API_KEY}
+      - OPENCLAW_URL=http://apa-agent:8000
+      - OPENCLAW_TOKEN=45575214285178078e4e65046cc363065ba63e82f19c7028
     networks:
       - kuvarpay-network
     depends_on:
-      - apa-agent
+      apa-agent:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   apa-agent:
     build:
       context: .
       dockerfile: Dockerfile.agent
     container_name: apa-agent
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    user: root
+    command: >
+      sh -c "
+      mkdir -p /root/.openclaw/extensions &&
+      cp -r /workspace/plugins/* /root/.openclaw/extensions/ &&
+      chown -R root:root /root/.openclaw/extensions &&
+      npx openclaw gateway run --port 8000
+      "
     volumes:
-      # Mount the brain folder as the primary workspace
       - ./agent-brain:/workspace
-      # Persist configuration and gateway state
-      - ./agent-brain/.openclaw:/home/node/.openclaw
+      - openclaw-data:/root/.openclaw
     environment:
       - OPENCLAW_WORKDIR=/workspace
       - OPENCLAW_CONFIG_PATH=/workspace/openclaw.json
-      # Pass keys directly to the container
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - STARTBUTTON_SECRET_KEY=${STARTBUTTON_SECRET_KEY}
       - WDK_SEED=${WDK_SEED}
       - APA_BACKEND_URL=http://apa-backend:3001
       - NODE_PATH=/usr/local/lib/node_modules
+      - OPENCLAW_ALLOW_INSECURE_PLUGINS=true
+      - APA_SIMULATION=${APA_SIMULATION}
+      - OPENCLAW_DEV=1
     ports:
       - "8000:8000"
     networks:
       - kuvarpay-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  openclaw-data:
 
 networks:
   kuvarpay-network:

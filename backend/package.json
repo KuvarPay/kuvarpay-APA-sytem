@@ -7,7 +7,8 @@
     "build": "tsup src/index.ts --format cjs --clean",
     "start": "node dist/index.js",
     "dev": "tsup src/index.ts --watch --onSuccess \"node dist/index.js\"",
-    "start:worker": "ts-node src/workers/main.ts"
+    "start:ts": "ts-node --transpile-only src/index.ts",
+    "start:worker": "ts-node --transpile-only src/workers/main.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,13 +20,16 @@
     "@tetherto/wdk-wallet-evm": "^1.0.0-beta.8",
     "@tetherto/wdk-wallet-tron": "^1.0.0-beta.4",
     "axios": "^1.6.0",
+    "bcryptjs": "^3.0.3",
     "bullmq": "^5.0.0",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.4",
     "fastify": "^4.24.0",
+    "fastify-sse-v2": "^4.2.2",
     "nodemailer": "^8.0.2",
     "pdf-parse": "^1.1.1",
     "pg": "^8.16.3",
+    "redis": "^4.6.10",
     "rayswap-db": "file:../database/rayswap-db",
     "sodium-universal": "^5.0.1",
     "uuid": "^13.0.0"
@@ -38,5 +42,9 @@
     "ts-node": "^10.9.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
+  },
+  "overrides": {
+    "drizzle-orm": "^0.44.4",
+    "pg": "^8.16.3"
   }
 }

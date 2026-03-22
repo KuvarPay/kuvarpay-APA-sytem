@@ -54,13 +54,19 @@ async function getBusinessOwnerEmail(businessId: string): Promise<{ email: strin
 }
 
 /** Build the HTML body for payroll notifications */
-function buildPayrollEmailHtml(type: string, message: string, batchId?: string): string {
+function buildPayrollEmailHtml(type: string, message: string, batchId?: string, vaultAddress?: string): string {
     const dashboardUrl = `${FRONTEND_URL}/dashboard/payroll`;
     const statusColor = type === 'COMPLETED' ? '#16A34A' : type === 'FAILED' ? '#DC2626' : type === 'FUNDING_REQUIRED' ? '#D97706' : '#7C3AED';
     const statusBg = type === 'COMPLETED' ? '#F0FDF4' : type === 'FAILED' ? '#FEF2F2' : type === 'FUNDING_REQUIRED' ? '#FFFBEB' : '#F5F3FF';
 
-    return `<!DOCTYPE html>
-<html lang="en">
+    const vaultSection = (type === 'FUNDING_REQUIRED' && vaultAddress) ? `
+    <div style="background:#0F172A;border-radius:12px;padding:24px;margin:24px 0;border:1px solid #CDF14030;text-align:left;">
+      <p style="margin:0 0 12px;color:#94A3B8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;">Secure Funding Vault</p>
+      <code style="display:block;background:rgba(255,255,255,0.05);padding:12px;border-radius:8px;color:#CDF140;font-family:monospace;font-size:14px;word-break:break-all;border:1px solid rgba(255,255,255,0.1);">${vaultAddress}</code>
+      <p style="margin:12px 0 0;color:#64748B;font-size:12px;line-height:1.5;">Please transfer the required USDT amount to this address on the selected network. The AI agent will detect the funding automatically.</p>
+    </div>` : '';
+
+    return `<html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="margin:0;padding:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#F6F6F6;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F6F6;padding:40px 0;">
@@ -75,6 +81,7 @@ function buildPayrollEmailHtml(type: string, message: string, batchId?: string):
       <span style="display:inline-block;background:${statusColor};color:#fff;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:8px;">${type.replace(/_/g, ' ')}</span>
       <p style="margin:8px 0 0;color:#334155;font-size:15px;line-height:1.6;">${message}</p>
     </div>
+    ${vaultSection}
     <div style="text-align:center;margin:28px 0;">
       <a href="${dashboardUrl}" style="background:#CDF140;color:#000;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:16px;display:inline-block;">View in Dashboard</a>
     </div>
@@ -94,7 +101,8 @@ export async function sendPayrollNotification(
     businessId: string,
     type: string,
     message: string,
-    batchId?: string
+    batchId?: string,
+    vaultAddress?: string
 ): Promise<boolean> {
     if (!transporter) {
         console.warn('[APA Email] Transporter not configured, skipping email');
@@ -119,8 +127,8 @@ export async function sendPayrollNotification(
             from: `"KuvarPay Payroll" <${process.env.FROM_EMAIL || process.env.SMTP_USER}>`,
             to: owner.email,
             subject: subjectMap[type] || `Payroll Update: ${type}`,
-            html: buildPayrollEmailHtml(type, message, batchId),
-            text: `Payroll ${type}: ${message}\n\nView details: ${FRONTEND_URL}/dashboard/payroll`,
+            html: buildPayrollEmailHtml(type, message, batchId, vaultAddress),
+            text: `Payroll ${type}: ${message}\n\nVault: ${vaultAddress || 'N/A'}\n\nView details: ${FRONTEND_URL}/dashboard/payroll`,
         });
         console.log(`[APA Email] ✅ Sent ${type} email to ${owner.email}`);
         return true;

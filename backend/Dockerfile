@@ -4,10 +4,13 @@ WORKDIR /app
 
 # Copy the database submodule and backend
 COPY database/ ./database/
-COPY backend/package*.json ./backend/
+# Build the database dependency
+WORKDIR /app/database/rayswap-db
+RUN npm install && npm run build
 
-# Install backend dependencies (which will link to the local database folder)
+# Install backend dependencies
 WORKDIR /app/backend
+COPY backend/package*.json ./
 RUN npm install
 
 # Copy the rest of the backend source

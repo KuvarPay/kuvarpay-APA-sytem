@@ -9,6 +9,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install WDK packages globally or in a place that OpenClaw can use
-RUN npm install -g @tetherto/wdk @tetherto/wdk-wallet-native @sinclair/typebox axios
+RUN npm install -g @tetherto/wdk @tetherto/wdk-wallet-evm @tetherto/wdk-wallet-tron @sinclair/typebox axios
 
 USER node

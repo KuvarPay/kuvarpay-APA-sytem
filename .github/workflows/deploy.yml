@@ -1,0 +1,102 @@
+name: Deploy APA to VPS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@master
+        env:
+          ENV_FILE_APA_PROD: ${{ secrets.ENV_FILE_APA_PROD }}
+        with:
+          envs: ENV_FILE_APA_PROD
+          host: 77.42.23.20
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 33522
+          script: |
+            set -euo pipefail
+            DEPLOY_DIR="/root/kuvarpay/apa"
+
+            echo "📁 Navigating to $DEPLOY_DIR"
+            if [ ! -d "$DEPLOY_DIR" ]; then
+              echo "🚀 Creating directory $DEPLOY_DIR"
+              mkdir -p "$DEPLOY_DIR"
+              cd "$DEPLOY_DIR"
+              # Assuming the repo name matches the subfolder if it's a monorepo, 
+              # but here it seems to be the APA repo.
+              git clone https://github.com/KuvarPay/kuvarpay-APA-sytem.git .
+            else
+              cd "$DEPLOY_DIR"
+            fi
+
+            echo "🛑 Stopping and cleaning up existing APA containers"
+            docker compose down --remove-orphans || true
+            docker rm -f apa-backend apa-worker apa-agent 2>/dev/null || true
+
+            echo "📥 Fetching latest code"
+            git reset --hard
+            git fetch --all --prune
+            git pull origin main
+
+            echo "🔄 Syncing and updating submodules"
+            git submodule sync --recursive
+            git submodule foreach --recursive 'git reset --hard && git clean -ffdx || true'
+            git submodule update --init --recursive --remote --force
+
+            echo "🔐 Writing fresh .env file for APA"
+            # Root env for docker-compose
+            echo "$ENV_FILE_APA_PROD" > .env
+            
+            # Backend env for app
+            mkdir -p backend
+            echo "$ENV_FILE_APA_PROD" > backend/.env
+
+            echo "🧹 Pruning Docker builder and system caches"
+            docker builder prune -af || true
+
+            echo "🐳 Building APA images with fresh layers"
+            docker compose build --pull --no-cache
+
+            echo "🚀 Starting APA containers"
+            docker compose up -d --remove-orphans
+
+            echo "⏳ Waiting for services to stabilize"
+            sleep 30
+            docker compose ps
+
+            echo "🌐 Performing health checks"
+            # Backend check
+            for i in {1..5}; do
+              if curl -fs http://localhost:3001/ping >/dev/null; then
+                echo "✅ APA Backend is healthy"
+                break
+              else
+                echo "⏳ Waiting for backend... (attempt $i/5)"
+                sleep 5
+              fi
+            done
+
+            # Agent check
+            for i in {1..5}; do
+              if curl -fs http://localhost:8000/healthz >/dev/null; then
+                echo "✅ APA Agent is healthy"
+                break
+              else
+                echo "⏳ Waiting for agent... (attempt $i/5)"
+                sleep 5
+              fi
+            done
+
+            echo "✅ APA Deployment finished!"

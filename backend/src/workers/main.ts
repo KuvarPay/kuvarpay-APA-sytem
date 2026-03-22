@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { payrollWorker } from './scheduler';
+import { payrollWorker, startSweepCron } from './scheduler';
 import { startFundingMonitor } from './funding-monitor';
+import { startRunwayMonitor } from './runway-monitor';
 
 console.log('🚀 APA Payroll Worker started...');
 
@@ -14,5 +15,7 @@ payrollWorker.on('failed', (job, err) => {
     console.error(`❌ Job ${job?.id} failed:`, err.message);
 });
 
-// Start the funding monitor (polls vault balances)
+// Start background monitors
 startFundingMonitor();
+startSweepCron();
+startRunwayMonitor();

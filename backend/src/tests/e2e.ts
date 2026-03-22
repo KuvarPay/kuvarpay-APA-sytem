@@ -76,7 +76,8 @@ async function runTest() {
             await new Promise(r => setTimeout(r, 5000));
 
             try {
-                const statusResponse = await axios.get(`${BASE_URL}/batches/${batchId}`);
+                // Add businessId to query to pass auth check
+                const statusResponse = await axios.get(`${BASE_URL}/batches/${batchId}?businessId=${'34c708f8-2ca8-48e9-9ea5-ee7ddfe88e63'}`);
                 const data = statusResponse.data;
 
                 console.log(`[Attempt ${attempts}] Status: ${data.status}`);
@@ -93,7 +94,7 @@ async function runTest() {
                     }
 
                     // Show vault address from schedule
-                    const scheduleDetails = await axios.get(`${BASE_URL}/batches/${batchId}`);
+                    const scheduleDetails = await axios.get(`${BASE_URL}/batches/${batchId}?businessId=${'34c708f8-2ca8-48e9-9ea5-ee7ddfe88e63'}`);
                     console.log(`🏦 Fund to Vault: ${scheduleDetails.data.vaultAddress || 'Check schedule'}`);
 
                     break;
@@ -105,7 +106,7 @@ async function runTest() {
 
         // Stage 4: Verify DB state
         console.log('\n--- VERIFICATION ---');
-        const finalStatus = await axios.get(`${BASE_URL}/batches/${batchId}`);
+        const finalStatus = await axios.get(`${BASE_URL}/batches/${batchId}?businessId=${'34c708f8-2ca8-48e9-9ea5-ee7ddfe88e63'}`);
         console.log(`Final Status: ${finalStatus.data.status}`);
         console.log(`Final USDT Amount: ${finalStatus.data.totalAmountUsdt}`);
 

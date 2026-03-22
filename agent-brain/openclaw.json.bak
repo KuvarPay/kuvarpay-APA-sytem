@@ -1,8 +1,4 @@
 {
-  "meta": {
-    "lastTouchedVersion": "2026.3.13",
-    "lastTouchedAt": "2026-03-20T15:32:57.480Z"
-  },
   "agents": {
     "defaults": {
       "model": {
@@ -66,15 +62,9 @@
     "ownerDisplay": "raw"
   },
   "gateway": {
+    "bind": "lan",
     "port": 8000,
     "mode": "local",
-    "bind": "lan",
-    "controlUi": {
-      "allowedOrigins": [
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-      ]
-    },
     "auth": {
       "mode": "token",
       "token": "45575214285178078e4e65046cc363065ba63e82f19c7028"
@@ -99,5 +89,9 @@
     "allow": [
       "apa-plugin"
     ]
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.3.20",
+    "lastTouchedAt": "2026-03-20T14:40:00.000Z"
   }
 }

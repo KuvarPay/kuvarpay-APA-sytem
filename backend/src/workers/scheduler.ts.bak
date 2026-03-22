@@ -1,0 +1,449 @@
+import { Queue, Worker, Job } from 'bullmq';
+import { db, schema, eq } from 'rayswap-db';
+import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
+import { emitThought } from '../utils/thought-emitter';
+
+const { payrollBatches, payrollSchedules, payrollAgentDecisions } = schema;
+
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'openrouter/openai/gpt-4o-mini';
+const KUVARPAY_API_KEY = process.env.KUVARPAY_API_KEY || 'apa_local_test_key';
+const APA_BACKEND_URL = process.env.APA_BACKEND_URL || 'http://localhost:3001';
+
+export const payrollQueue = new Queue('payroll-processing', {
+    connection: { url: REDIS_URL }
+});
+
+// ─── Tool definitions the brain can call ───────────────────────────────
+const TOOLS = [
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_get_rates',
+            description: 'Fetch settlement-snapshot FX rate for a fiat currency. Returns the rate and optionally converts an amount to USDT.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    currency: { type: 'string', description: 'Fiat currency code e.g. NGN, GHS, RWF' },
+                    amount: { type: 'number', description: 'Optional fiat amount to convert to USDT' }
+                },
+                required: ['currency']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_get_batch_details',
+            description: 'Fetch the recipients list and full details for a payroll batch.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    batchId: { type: 'string', description: 'The batch ID' }
+                },
+                required: ['batchId']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_manage_wallet',
+            description: 'Get or derive the vault wallet address for a schedule. Checks USDT balance on-chain. Optionally saves the address to the schedule.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    scheduleId: { type: 'string', description: 'The payroll schedule ID' },
+                    network: { type: 'string', enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], description: 'EVM network' },
+                    saveToSchedule: { type: 'boolean', description: 'If true, persist derived address to the schedule record' },
+                    checkCrossChain: { type: 'boolean', description: 'If true, check balances on all EVM chains' }
+                },
+                required: ['scheduleId', 'network']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_log_decision',
+            description: 'Save a decision, thought, or plan to the audit trail for transparency.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    batchId: { type: 'string' },
+                    decisionType: { type: 'string', description: 'e.g. EVALUATION, FUNDING_CHECK, EXECUTION' },
+                    reasoning: { type: 'string' },
+                    plan: { description: 'Optional structured plan data' }
+                },
+                required: ['batchId', 'decisionType', 'reasoning']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_update_batch',
+            description: 'Update batch status, USDT total, or error log in the database.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    batchId: { type: 'string' },
+                    data: {
+                        type: 'object',
+                        properties: {
+                            status: { type: 'string', enum: ['PENDING', 'FUNDING_REQUIRED', 'FUNDED', 'PROCESSING', 'COMPLETED', 'FAILED'] },
+                            totalAmountUsdt: { type: 'string' },
+                            errorLog: { type: 'string' },
+                            executedAt: { type: 'string' }
+                        }
+                    }
+                },
+                required: ['batchId', 'data']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_send_notification',
+            description: 'Send a notification to the merchant about payroll status. Include vaultAddress for FUNDING_REQUIRED notifications so the merchant can fund directly.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    businessId: { type: 'string' },
+                    type: { type: 'string', enum: ['FUNDING_REQUIRED', 'PROCESSING', 'COMPLETED', 'FAILED'] },
+                    message: { type: 'string' },
+                    vaultAddress: { type: 'string', description: 'Vault address to include in FUNDING_REQUIRED emails for Just-In-Time funding' }
+                },
+                required: ['businessId', 'type', 'message']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_fiat_transfer',
+            description: 'Initiate a fiat payout via Startbutton for a specific recipient in a batch. Use this for bank or mobile money transfers.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    batchId: { type: 'string' },
+                    recipientIndex: { type: 'number', description: 'Index of the recipient in the batch array' },
+                    reference: { type: 'string', description: 'Unique reference for the transfer' }
+                },
+                required: ['batchId', 'recipientIndex']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_payout',
+            description: 'Initiate an on-chain USDT payout for a specific recipient in a batch using the WDK vault. Use this for crypto-native payouts.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    batchId: { type: 'string' },
+                    recipientIndex: { type: 'number', description: 'Index of the recipient in the batch array' }
+                },
+                required: ['batchId', 'recipientIndex']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_get_startbutton_balance',
+            description: 'Fetch the current wallet balances for our Startbutton account. Use this to verify that deposited USDT has arrived before starting fiat payouts.',
+            parameters: {
+                type: 'object',
+                properties: {}
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_deposit_to_startbutton',
+            description: 'Transfer USDT from the vault wallet to our Startbutton deposit address. This is required before fiat payouts can be executed.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    scheduleId: { type: 'string' },
+                    amountUsdt: { type: 'number', description: 'The amount of USDT to deposit' }
+                },
+                required: ['scheduleId', 'amountUsdt']
+            }
+        }
+    },
+    {
+        type: 'function' as const,
+        function: {
+            name: 'apa_get_schedule_details',
+            description: 'Fetch the parent schedule metadata (network, vaultAddress, category, etc.).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    scheduleId: { type: 'string', description: 'The schedule ID' }
+                },
+                required: ['scheduleId']
+            }
+        }
+    }
+];
+
+// ─── Tool execution — calls the APA Backend HTTP API ───────────────────
+const internalHeaders = { 'x-api-key': KUVARPAY_API_KEY };
+
+async function executeTool(name: string, args: any): Promise<string> {
+    try {
+        switch (name) {
+            case 'apa_get_rates': {
+                const res = await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/rates`, args, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_get_batch_details': {
+                const res = await axios.get(`${APA_BACKEND_URL}/api/v1/payroll/batches/${args.batchId}`, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_manage_wallet': {
+                const res = await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/wallet`, args, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_log_decision': {
+                await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/agent/decision`, args, { headers: internalHeaders });
+                return 'Decision logged successfully.';
+            }
+            case 'apa_update_batch': {
+                await axios.patch(`${APA_BACKEND_URL}/api/v1/payroll/batches/${args.batchId}`, args.data, { headers: internalHeaders });
+                return 'Batch updated successfully.';
+            }
+            case 'apa_get_startbutton_balance': {
+                const res = await axios.get(`${APA_BACKEND_URL}/api/v1/payroll/wallet/startbutton/balance`, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_deposit_to_startbutton': {
+                const res = await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/wallet/startbutton/deposit`, args, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_send_notification': {
+                await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/notifications`, args, { headers: internalHeaders });
+                return 'Notification sent successfully.';
+            }
+            case 'apa_payout': {
+                const res = await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/batches/${args.batchId}/payout`, {}, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_fiat_transfer': {
+                const res = await axios.post(`${APA_BACKEND_URL}/api/v1/payroll/batches/${args.batchId}/fiat-transfer`, args, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            case 'apa_get_schedule_details': {
+                const res = await axios.get(`${APA_BACKEND_URL}/api/v1/payroll/schedules/${args.scheduleId}`, { headers: internalHeaders });
+                return JSON.stringify(res.data);
+            }
+            default:
+                return `Unknown tool: ${name}`;
+        }
+    } catch (err: any) {
+        const errMsg = err.response?.data?.error || err.message;
+        console.error(`[ToolExec] ${name} failed:`, errMsg);
+        return JSON.stringify({ error: errMsg });
+    }
+}
+
+// ─── Agentic loop — the brain calls tools until it's done ──────────────
+const MAX_ITERATIONS = 20;
+
+async function runAgentLoop(batchId: string, scheduleId: string, jobType: string, network: string, agentPrompt?: string) {
+    const isExecution = jobType === 'EXECUTE_PAYOUT';
+
+    emitThought({
+        scheduleId,
+        batchId,
+        type: 'INFO',
+        message: `Agent Brain initialized for ${jobType}. Starting evaluation cycle...`
+    });
+
+    const systemPrompt = isExecution
+        ? `You are the execution brain of the Autonomous Payroll Agent (APA).
+Your mission is to process fiat payouts for a FUNDED payroll batch using Startbutton.
+1. Call 'apa_get_schedule_details' to check the parent schedule's configuration (network, vault).
+2. Call 'apa_get_batch_details' to verify the recipients list and calculate total USDT needed.
+3. Call 'apa_manage_wallet' to check that the vault actually has enough USDT balance.
+4. If fiat payouts are required:
+   - Call 'apa_deposit_to_startbutton' to transfer the total required USDT from vault to Startbutton partner account.
+   - Use 'apa_get_startbutton_balance' to verify the funds have arrived.
+5. Once confirmed:
+   - For EACH recipient in the batch recipients list requiring fiat payout (bank or mobile money):
+     - Call 'apa_fiat_transfer' with the 'recipientIndex'.
+6. After all transfers, call 'apa_update_batch' to set status to 'COMPLETED'.
+7. Call 'apa_log_decision' and 'apa_send_notification'.
+
+CORE RULES:
+- Never initiate transfers if vault balance is insufficient.
+- Startbutton requires bank details. Skip and log if missing.
+- Iterate carefully using recipient index.`
+        : `You are the evaluation and setup brain of the Autonomous Payroll Agent (APA).
+Your mission is to analyze a payroll batch and ensure the parent schedule is correctly configured (Vault derivation).
+1. Call 'apa_get_schedule_details' to see the current schedule setup.
+2. Call 'apa_get_batch_details' to get recipients and fiat amounts.
+3. For each unique fiat currency, call 'apa_get_rates' for USDT equivalent.
+4. Calculate total USDT required + 5% buffer.
+5. If the schedule has no vault address or you need to verify it:
+   - Call 'apa_manage_wallet' (saveToSchedule=true) to derive the vault address for this specific schedule.
+6. Transition status:
+   - Set batch status to 'FUNDING_REQUIRED' and set 'totalAmountUsdt' to the calculated amount (with buffer).
+7. Call 'apa_log_decision' and 'apa_send_notification'.
+
+CORE RULES:
+- Always use the 5% buffer.
+- PRE-EVALUATION MODE (Step 3 Review): If this is a pre-evaluation run, your job is ONLY to provide the estimate and ensure a vault address is derived. Do NOT proceed to execution.
+- FORMAT: You MUST end your thoughts with precisely this format: "Total USDT needed: [amount] USDT" so the UI can parse it. Summarize the Vault Address as well.`;
+
+    const userPrompt = isExecution
+        ? `Funds have been detected! Please execute the payout for:
+- Batch ID: ${batchId}
+- Schedule ID: ${scheduleId}
+${agentPrompt ? `- Additional Context: ${agentPrompt}` : ''}`
+        : `New payroll received. Evaluate funding:
+- Batch ID: ${batchId}
+- Schedule ID: ${scheduleId}
+- Selected Network: ${network}
+${agentPrompt ? `- User Instructions: ${agentPrompt}` : ''}`;
+
+    const messages: any[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+    ];
+
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+        console.log(`[AgentLoop] Iteration ${i + 1}/${MAX_ITERATIONS}`);
+
+        const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+            model: OPENROUTER_MODEL,
+            messages,
+            tools: TOOLS,
+            tool_choice: 'auto',
+            temperature: 0.1,
+            max_tokens: 4096
+        }, {
+            headers: {
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://kuvarpay.com',
+                'X-Title': 'KuvarPay APA'
+            }
+        });
+
+        const choice = response.data.choices?.[0];
+        const assistantMessage = choice?.message;
+
+        if (choice) {
+            console.log(`[AgentLoop] Model response: ${JSON.stringify({ finish_reason: choice.finish_reason, has_content: !!assistantMessage.content, tool_calls: assistantMessage.tool_calls?.length || 0 })}`);
+        }
+
+        if (!assistantMessage) {
+            console.error('[AgentLoop] No message in response');
+            break;
+        }
+
+        messages.push(assistantMessage);
+
+        if (assistantMessage.content) {
+            console.log(`[AgentLoop] 🤖 Assistant thoughts: ${assistantMessage.content.substring(0, 500)}`);
+            emitThought({
+                scheduleId,
+                batchId,
+                type: 'INFO',
+                message: assistantMessage.content
+            });
+        }
+
+        if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+            for (const toolCall of assistantMessage.tool_calls) {
+                const fnName = toolCall.function.name;
+                let fnArgs: any;
+                try {
+                    fnArgs = JSON.parse(toolCall.function.arguments);
+                } catch {
+                    fnArgs = {};
+                }
+
+                console.log(`[AgentLoop] 🔧 Calling tool: ${fnName}`, JSON.stringify(fnArgs).substring(0, 200));
+                emitThought({
+                    scheduleId,
+                    batchId,
+                    type: 'TOOL',
+                    message: fnName === 'apa_get_rates' ? 'Fetching latest FX rates...' :
+                             fnName === 'apa_get_batch_details' ? 'Retrieving batch & recipient info...' :
+                             fnName === 'apa_manage_wallet' ? 'Deriving vault address & checking balances...' :
+                             fnName === 'apa_update_batch' ? 'Syncing status to database...' :
+                             fnName === 'apa_log_decision' ? 'Finalizing evaluation logic...' :
+                             fnName === 'apa_send_notification' ? 'Notifying merchant...' :
+                             fnName === 'apa_fiat_transfer' ? 'Broadcasting fiat payout to recipient...' :
+                             fnName === 'apa_deposit_to_startbutton' ? 'Depositing USDT to payment bridge...' :
+                             fnName === 'apa_get_startbutton_balance' ? 'Verifying bridge balance...' :
+                             fnName === 'apa_payout' ? 'Broadcasting on-chain payout...' :
+                             `Executing ${fnName}...`
+                });
+                const result = await executeTool(fnName, fnArgs);
+                console.log(`[AgentLoop] ✅ ${fnName} result:`, result.substring(0, 300));
+
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    content: result
+                });
+            }
+        } else {
+            const finalContent = assistantMessage.content || 'Agent completed without specific summary.';
+            console.log(`[AgentLoop] 🏁 Agent finished: ${finalContent.substring(0, 500)}`);
+            emitThought({
+                scheduleId,
+                batchId,
+                type: 'SUCCESS',
+                message: "Payroll optimization cycle complete. Batch status updated."
+            });
+            return finalContent;
+        }
+    }
+
+    return 'Agent reached max iterations.';
+}
+
+export const payrollWorker = new Worker('payroll-processing', async (job: Job) => {
+    const { scheduleId, batchId, type, agentPrompt } = job.data;
+    
+    // Fetch schedule to get the selected network
+    const [schedule] = await db.select().from(payrollSchedules).where(eq(payrollSchedules.id, scheduleId));
+    const network = schedule?.network || 'bsc';
+
+    console.log(`[Worker] 🚀 Dispatching ${type} for Batch ${batchId} (Network: ${network}) to Agent Brain`);
+    try {
+        const finalSummary = await runAgentLoop(batchId, scheduleId, type, network, agentPrompt);
+        console.log(`[Worker] ✅ Agent completed for Batch ${batchId}`);
+        return { summary: finalSummary };
+    } catch (error: any) {
+        console.error(`[Worker] ❌ Agent error for Batch ${batchId}:`, error.message);
+        try {
+            await db.insert(payrollAgentDecisions).values({
+                id: uuidv4(),
+                batchId,
+                decisionType: 'ERROR',
+                reasoning: `Agent loop error: ${error.message}`,
+                updatedAt: new Date().toISOString()
+            });
+            await db.update(payrollBatches)
+                .set({ status: 'FAILED' as any, errorLog: error.message, updatedAt: new Date().toISOString() })
+                .where(eq(payrollBatches.id, batchId));
+        } catch (dbErr) {
+            console.error('[Worker] Failed to log error to DB:', dbErr);
+        }
+        throw error;
+    }
+}, {
+    connection: { url: REDIS_URL }
+});

@@ -22,15 +22,16 @@ export class AgentService {
     /**
      * Tool: Log a decision or thought process for transparency in the dashboard.
      */
-    async logDecision(batchId: string, type: string, reasoning: string, plan?: any): Promise<void> {
+    async logDecision(batchId: string | null, type: string, reasoning: string, plan?: any, scheduleId?: string): Promise<void> {
         await db.insert(payrollAgentDecisions).values({
             id: uuidv4(),
             batchId,
+            scheduleId,
             decisionType: type,
             reasoning,
             plan,
             updatedAt: new Date().toISOString()
-        });
+        } as any);
     }
 
     /**

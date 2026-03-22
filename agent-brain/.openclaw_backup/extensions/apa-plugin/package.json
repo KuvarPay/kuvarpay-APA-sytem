@@ -1,0 +1,20 @@
+{
+  "name": "apa-plugin",
+  "version": "1.0.0",
+  "description": "KuvarPay Autonomous Payroll Agent Plugin",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": {
+      "apa-plugin": {
+        "type": "tool",
+        "entry": "index.ts"
+      }
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.32.15",
+    "axios": "^1.6.7",
+    "@tetherto/wdk": "latest",
+    "@tetherto/wdk-wallet-native": "latest"
+  }
+}
