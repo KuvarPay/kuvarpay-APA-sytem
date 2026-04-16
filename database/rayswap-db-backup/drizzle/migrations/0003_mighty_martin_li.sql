@@ -1,1 +1,0 @@
-ALTER TYPE "public"."SettlementStatus" ADD VALUE 'HOLD' BEFORE 'COMPLETED';

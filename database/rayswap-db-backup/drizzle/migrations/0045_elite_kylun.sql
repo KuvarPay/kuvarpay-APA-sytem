@@ -1,4 +1,0 @@
-ALTER TABLE "sandbox_transactions" ADD COLUMN "coaching_payment_link_id" text;--> statement-breakpoint
-ALTER TABLE "transactions" ADD COLUMN "coaching_payment_link_id" text;--> statement-breakpoint
-ALTER TABLE "sandbox_transactions" ADD CONSTRAINT "sandbox_transactions_coachingPaymentLinkId_fkey" FOREIGN KEY ("coaching_payment_link_id") REFERENCES "public"."sandbox_coaching_payment_links"("id") ON DELETE set null ON UPDATE cascade;--> statement-breakpoint
-ALTER TABLE "transactions" ADD CONSTRAINT "transactions_coachingPaymentLinkId_fkey" FOREIGN KEY ("coaching_payment_link_id") REFERENCES "public"."coaching_payment_links"("id") ON DELETE set null ON UPDATE cascade;

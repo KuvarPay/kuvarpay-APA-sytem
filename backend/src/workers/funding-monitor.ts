@@ -1,23 +1,14 @@
 import { db, schema, eq } from 'rayswap-db';
 import { v4 as uuidv4 } from 'uuid';
-import { WdkService } from '../integrations/wdk';
+import { BlockchainService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { payrollQueue } from './scheduler';
 
 const { payrollBatches, payrollSchedules, payrollAgentDecisions } = schema;
 
-// Map user-facing network to WDK network
-function toWdkNetwork(network: string): string {
-    const net = network?.toLowerCase();
-    if (['tron', 'bsc', 'polygon', 'arbitrum', 'base', 'optimism', 'ethereum'].includes(net)) {
-        return net;
-    }
-    return 'ethereum';
-}
-
 /**
  * Polls all FUNDING_REQUIRED batches and checks if the vault has been funded.
- * Transitions to FUNDED when the balance meets the required USDT amount.
+ * Transitions to FUNDED when the balance meets the required asset amount.
  */
 async function checkFunding() {
     try {
@@ -28,7 +19,7 @@ async function checkFunding() {
         if (pendingBatches.length === 0) return;
 
         const seed = await WdkSecretManager.getSeed();
-        const wdk = new WdkService(seed);
+        const blockchain = new BlockchainService(seed);
 
         for (const batch of pendingBatches) {
             try {
@@ -38,49 +29,46 @@ async function checkFunding() {
 
                 if (!schedule) continue;
 
-                const requiredUsdt = parseFloat(batch.totalAmountUsdt) || 0;
-                if (requiredUsdt <= 0) continue;
+                const requiredAmount = parseFloat(batch.totalAmountUsdt) || 0;
+                if (requiredAmount <= 0) continue;
 
-                let balanceUsdt = 0;
+                let balanceValue = 0;
                 const isSimulation = process.env.APA_SIMULATION === 'true';
 
                 if (isSimulation) {
-                    // In simulation mode, we wait at least 5 seconds after the batch is created/updated 
-                    // before "detecting" the funding to make the flow feels realistic.
                     const updatedAt = new Date(batch.updatedAt || new Date()).getTime();
                     const now = new Date().getTime();
                     
-                    if (now - updatedAt < 20000) {
-                        console.log(`[FundingMonitor] [SIMULATION] Batch ${batch.id.slice(0, 8)}... waiting for mock funding delay (20s).`);
+                    if (now - updatedAt < 10000) { // Reduced to 10s for better demo feel
+                        console.log(`[FundingMonitor] [SIMULATION] Batch ${batch.id.slice(0, 8)}... waiting for mock funding delay.`);
                         continue;
                     }
                     
-                    balanceUsdt = requiredUsdt;
+                    balanceValue = requiredAmount;
                     console.log(`[FundingMonitor] [SIMULATION] Batch ${batch.id.slice(0, 8)}... mock funding DETECTED!`);
                 } else {
-                    // Check vault balance on-chain
-                    const balance = await wdk.getUsdtBalance(
-                        schedule.vaultAddress,
-                        schedule.network || 'bsc',
-                        schedule.vaultIndex || 0
-                    );
-
-                    // WDK returns bigint in smallest unit (6 decimals for USDT)
-                    balanceUsdt = Number(balance) / 1e6;
+                    // Check vault balance via Generalized BlockchainService
+                    balanceValue = await blockchain.getBalance({
+                        address: schedule.vaultAddress,
+                        network: schedule.network || 'bsc',
+                        asset: schedule.network.toLowerCase() === 'xlm' ? 'USDC' : 'USDT',
+                        memo: schedule.vaultMemo || undefined,
+                        index: schedule.vaultIndex || 0
+                    });
 
                     console.log(
                         `[FundingMonitor] Batch ${batch.id.slice(0, 8)}... ` +
                         `vault=${schedule.vaultAddress.slice(0, 10)}... ` +
-                        `balance=${balanceUsdt.toFixed(2)} / required=${requiredUsdt.toFixed(2)} USDT`
+                        `balance=${balanceValue.toFixed(2)} / required=${requiredAmount.toFixed(2)}`
                     );
 
                     // Sync balance to schedule and update timestamp
                     await db.update(payrollSchedules)
-                        .set({ vaultBalanceUsdt: String(balanceUsdt), updatedAt: new Date().toISOString() })
+                        .set({ vaultBalanceUsdt: String(balanceValue), updatedAt: new Date().toISOString() })
                         .where(eq(payrollSchedules.id, schedule.id));
                 }
 
-                if (balanceUsdt >= requiredUsdt) {
+                if (balanceValue >= requiredAmount) {
                     // Transition to FUNDED
                     await db.update(payrollBatches)
                         .set({ status: 'FUNDED' as any, updatedAt: new Date().toISOString() })
@@ -90,8 +78,8 @@ async function checkFunding() {
                         id: uuidv4(),
                         batchId: batch.id,
                         decisionType: 'FUNDING_DETECTED',
-                        reasoning: `Vault ${schedule.vaultAddress} has ${balanceUsdt.toFixed(6)} USDT. Required: ${requiredUsdt.toFixed(6)} USDT. Batch is now FUNDED.`,
-                        plan: { balanceUsdt, requiredUsdt, vaultAddress: schedule.vaultAddress },
+                        reasoning: `Vault ${schedule.vaultAddress} has ${balanceValue.toFixed(6)} units. Required: ${requiredAmount.toFixed(6)}. Batch is now FUNDED.`,
+                        plan: { balanceValue, requiredAmount, vaultAddress: schedule.vaultAddress },
                         updatedAt: new Date().toISOString()
                     });
 

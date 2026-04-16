@@ -1,6 +1,0 @@
-.env
-.env.local
-.env.development.local
-dist/
-node_modules/
-open_db_tunnel.sh

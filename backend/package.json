@@ -16,6 +16,7 @@
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/multipart": "^8.3.1",
+    "@stellar/stellar-sdk": "^15.0.1",
     "@tetherto/wdk": "latest",
     "@tetherto/wdk-wallet-evm": "^1.0.0-beta.8",
     "@tetherto/wdk-wallet-tron": "^1.0.0-beta.4",
@@ -29,8 +30,8 @@
     "nodemailer": "^8.0.2",
     "pdf-parse": "^1.1.1",
     "pg": "^8.16.3",
-    "redis": "^4.6.10",
     "rayswap-db": "file:../database/rayswap-db",
+    "redis": "^4.6.10",
     "sodium-universal": "^5.0.1",
     "uuid": "^13.0.0"
   },

@@ -32,7 +32,7 @@
         "workspace": "/workspace",
         "agentDir": "/workspace/.openclaw/agents/main",
         "model": {
-          "primary": "openrouter/stepfun/step-3.5-flash:free",
+          "primary": "openrouter/google/gemma-4-31b-it:free",
           "fallbacks": [
             "openrouter/stepfun/step-3.5-flash",
             "openrouter/google/gemini-2.5-flash-lite",

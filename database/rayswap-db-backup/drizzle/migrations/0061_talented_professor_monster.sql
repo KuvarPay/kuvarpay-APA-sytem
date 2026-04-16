@@ -1,1 +1,0 @@
-ALTER TYPE "public"."CampaignStatus" ADD VALUE 'PAUSED' BEFORE 'COMPLETED';

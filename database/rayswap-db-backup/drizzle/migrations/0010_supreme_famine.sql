@@ -1,1 +1,0 @@
-ALTER TABLE "currencies" ADD COLUMN "decimals" integer;

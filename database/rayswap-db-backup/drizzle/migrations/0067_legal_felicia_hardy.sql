@@ -1,1 +1,0 @@
-ALTER TABLE "businesses" ADD COLUMN "onboarding_progress" jsonb;

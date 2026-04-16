@@ -1,5 +1,5 @@
 import { db, schema, eq, desc } from 'rayswap-db';
-import { WdkService } from '../integrations/wdk';
+import { BlockchainService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { FxService } from './fx-service';
 import { v4 as uuidv4 } from 'uuid';
@@ -66,10 +66,15 @@ export class AgentService {
     /**
      * Handle the Agent's request for balance.
      */
-    async checkWdkBalance(address: string, network: 'ethereum' | 'tron'): Promise<bigint> {
+    async checkBlockchainBalance(address: string, network: string, asset: string = 'USDT', memo?: string): Promise<number> {
         const seed = await WdkSecretManager.getSeed();
-        const wdk = new WdkService(seed);
-        const balance = await wdk.getUsdtBalance(address, network);
+        const blockchain = new BlockchainService(seed);
+        const balance = await blockchain.getBalance({
+            address,
+            network,
+            asset,
+            memo
+        });
         return balance;
     }
 }

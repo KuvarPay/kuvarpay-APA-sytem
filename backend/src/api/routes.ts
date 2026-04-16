@@ -3,7 +3,7 @@ import { db, schema, eq, desc, and, sql } from 'rayswap-db';
 import { payrollQueue, emailQueue } from '../workers/scheduler';
 import { v4 as uuidv4 } from 'uuid';
 import { FxService } from '../services/fx-service';
-import { WdkService } from '../integrations/wdk';
+import { BlockchainService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { StartbuttonService } from '../services/startbutton-service';
 import { FastifySSEPlugin } from 'fastify-sse-v2';
@@ -133,14 +133,22 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .where(eq(payrollSchedules.businessId, body.businessId) as any);
         const vaultIndex = existing.length;
 
-        // Derive real vault address via WDK
+        // Derive real vault address via BlockchainService
         let vaultAddress: string;
+        let vaultMemo: string | null = null;
         try {
             const seed = await WdkSecretManager.getSeed();
-            const wdk = new WdkService(seed);
-            vaultAddress = await wdk.getBatchAddress(vaultIndex, toWdkNetwork(network));
+            const blockchain = new BlockchainService(seed);
+            
+            if (network.toLowerCase() === 'xlm') {
+                vaultAddress = process.env.STELLAR_MASTER_WALLET || 'pending';
+                // Generate a unique numeric memo for this schedule
+                vaultMemo = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+            } else {
+                vaultAddress = await blockchain.getAddress(vaultIndex, toWdkNetwork(network));
+            }
         } catch (wdkErr: any) {
-            console.warn('WDK derivation failed, using placeholder:', wdkErr.message);
+            console.warn('Blockchain derivation failed, using placeholder:', wdkErr.message);
             vaultAddress = 'Vault-' + scheduleId.slice(0, 8);
         }
 
@@ -155,6 +163,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
                 status: 'PENDING',
                 vaultAddress,
                 vaultIndex,
+                vaultMemo,
                 network,
                 updatedAt: new Date().toISOString()
             }).returning();
@@ -331,40 +340,51 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
             const vaultIndex = schedule.vaultIndex || 0;
             const seed = await WdkSecretManager.getSeed();
-            const wdk = new WdkService(seed);
+            const blockchain = new BlockchainService(seed);
+
+            // Fetch memo if it's Stellar
+            const memo = schedule.vaultMemo;
 
             // Derive the primary address
-            const primaryAddress = await wdk.getBatchAddress(vaultIndex, toWdkNetwork(network));
+            const primaryAddress = network.toLowerCase() === 'xlm' 
+                ? (process.env.STELLAR_MASTER_WALLET || '')
+                : await blockchain.getAddress(vaultIndex, toWdkNetwork(network));
 
-            // Check balance on the primary network
-            let primaryBalance = BigInt(0);
+            // Check balance
+            let balance = 0;
             try {
-                primaryBalance = await wdk.getUsdtBalance(primaryAddress, toWdkNetwork(network));
+                balance = await blockchain.getBalance({
+                    address: primaryAddress,
+                    network: network.toLowerCase() === 'xlm' ? 'xlm' : toWdkNetwork(network),
+                    asset: network.toLowerCase() === 'xlm' ? 'USDC' : 'USDT',
+                    memo: memo || undefined,
+                    index: vaultIndex
+                });
             } catch (balErr: any) {
                 console.warn(`[Wallet] Balance check failed for ${network}:`, balErr.message);
             }
 
-            let balanceUsdt = Number(primaryBalance) / 1e6;
+            let balanceValue = balance;
 
-            // Simulation Mock: If APA_SIMULATION is true, return a fake balance of 10,000 USDT
+            // Simulation Mock
             if (process.env.APA_SIMULATION === 'true') {
-                balanceUsdt = 10000;
-                console.log(`[Wallet] APA_SIMULATION active. Overriding balance to ${balanceUsdt} USDT`);
-            }
-
-            // Save to schedule if requested
-            if (saveToSchedule && primaryAddress !== schedule.vaultAddress) {
-                await db.update(payrollSchedules)
-                    .set({ vaultAddress: primaryAddress, network, updatedAt: new Date().toISOString() })
-                    .where(eq(payrollSchedules.id, scheduleId) as any);
+                balanceValue = 10000;
+                console.log(`[Wallet] APA_SIMULATION active. Overriding balance to ${balanceValue} units`);
             }
 
             return {
                 primaryNetwork: network,
                 primaryAddress,
-                balanceUsdt,
-                totalUsdt: balanceUsdt,
-                allBalances: [{ network, address: primaryAddress, amount: balanceUsdt.toFixed(6), symbol: 'USDT' }]
+                primaryMemo: memo,
+                balance,
+                totalUsdt: balanceValue,
+                allBalances: [{ 
+                    network, 
+                    address: primaryAddress, 
+                    memo: memo || undefined,
+                    amount: balanceValue.toFixed(6), 
+                    symbol: network.toLowerCase() === 'xlm' ? 'USDC' : 'USDT' 
+                }]
             };
         } catch (error: any) {
             fastify.log.error(error);
@@ -420,18 +440,33 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
             const vaultIndex = schedule.vaultIndex || 0;
             const network = schedule.network || 'bsc';
+            const asset = network.toLowerCase() === 'xlm' ? 'USDC' : 'USDT';
             const seed = await WdkSecretManager.getSeed();
-            const wdk = new WdkService(seed);
+            const blockchain = new BlockchainService(seed);
+
+            const startbuttonDepositAddress = network.toLowerCase() === 'xlm'
+                ? process.env.STARTBUTTON_USDC_DEPOSIT_ADDRESS_STELLAR
+                : process.env.STARTBUTTON_USDT_DEPOSIT_ADDRESS;
+
+            if (!startbuttonDepositAddress) {
+                return reply.status(500).send({ error: `Startbutton deposit address for ${network} is not configured` });
+            }
 
             let txHash: string;
             if (process.env.MOCK_PAYOUT === 'true') {
                 txHash = `0xmock_deposit_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-                console.log(`[Deposit] MOCK_PAYOUT active. Fake deposit of ${amountUsdt} USDT to ${depositAddress} on ${network}. Tx: ${txHash}`);
+                console.log(`[Deposit] MOCK_PAYOUT active. Fake deposit of ${amountUsdt} ${asset} to ${startbuttonDepositAddress} on ${network}. Tx: ${txHash}`);
             } else {
-                txHash = await wdk.sendUsdt(vaultIndex, depositAddress, amountUsdt, toWdkNetwork(network));
+                txHash = await blockchain.sendToken({
+                    index: vaultIndex,
+                    to: startbuttonDepositAddress,
+                    amount: Number(amountUsdt),
+                    network: network.toLowerCase() === 'xlm' ? 'xlm' : toWdkNetwork(network),
+                    asset
+                });
             }
 
-            return { success: true, txHash, destination: depositAddress, network };
+            return { success: true, txHash, destination: startbuttonDepositAddress, network, asset };
         } catch (error: any) {
             fastify.log.error(error);
             return reply.status(500).send({ error: `Deposit failed: ${error.message}` });
@@ -848,7 +883,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             fastify.log.info(`[Payout] Starting execution for Batch ${id} (${recipients.length} recipients) on ${schedule.network}...`);
 
             const seed = await WdkSecretManager.getSeed();
-            const wdk = new WdkService(seed);
+            const blockchain = new BlockchainService(seed);
             const vaultIndex = schedule.vaultIndex || 0;
             const network = schedule.network || 'bsc';
 
@@ -860,7 +895,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
                     txHash = `0xmock_tx_hash_${id.slice(0, 8)}_${Math.random().toString(36).substring(7)}`;
                     console.log(`[Payout] APA_SIMULATION active. Generating fake hash: ${txHash}`);
                 } else {
-                    txHash = await wdk.sendUsdt(vaultIndex, recipient.address, recipient.amountUsdt || recipient.amount, network);
+                    txHash = await blockchain.sendToken({
+                        index: vaultIndex,
+                        to: recipient.address,
+                        amount: Number(recipient.amountUsdt || recipient.amount),
+                        network,
+                        asset: network.toLowerCase() === 'xlm' ? 'USDC' : 'USDT'
+                    });
                 }
                 txHashes.push(txHash);
                 fastify.log.info(`[Payout] Sent to ${recipient.address}: ${txHash}`);

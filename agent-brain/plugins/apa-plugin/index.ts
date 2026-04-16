@@ -198,7 +198,7 @@ export default function (api: any) {
         description: "Get vault wallet address and check balance. Always derives a real address via the backend WDK service and optionally saves it to the schedule.",
         parameters: Type.Object({
             scheduleId: Type.String({ description: "The ID of the payroll schedule" }),
-            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' }),
+            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc', 'xlm'], default: 'bsc' }),
             saveToSchedule: Type.Optional(Type.Boolean({ default: false })),
             checkCrossChain: Type.Optional(Type.Boolean({ default: true }))
         }),
@@ -224,33 +224,23 @@ export default function (api: any) {
         name: "apa_deposit_to_startbutton",
         description: "Transfer the calculated total USDT (including buffer) from the Vault to the Startbutton Bridge address. This must be called before payouts can begin.",
         parameters: Type.Object({
-            amountUsdt: Type.String({ description: "The total USDT amount to transfer" }),
-            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' }),
+            amountUsdt: Type.String({ description: "The total token amount to transfer (e.g. USDT or USDC)" }),
+            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc', 'xlm'], default: 'bsc' }),
+            scheduleId: Type.String({ description: "The schedule ID to deduct from" })
         }),
-        async execute(_id: string, params: { amountUsdt: string; network: string }) {
+        async execute(_id: string, params: { amountUsdt: string; network: string; scheduleId: string }) {
             try {
                 if (isSimulation) {
-                    return { content: [{ type: "text", text: `SIMULATION: Transfer of ${params.amountUsdt} USDT to Bridge (0x0Be...) successful. Hash: 0xmock_transfer_hash` }] };
+                    return { content: [{ type: "text", text: `SIMULATION: Transfer of ${params.amountUsdt} to Bridge successful. Hash: 0xmock_transfer_hash` }] };
                 }
 
-                const BRIDGE_ADDRESS = "0x0Be508750D2C1736c63a5A1dFf11317F54Eb072c";
-                const { WDK } = await import('@tetherto/wdk');
-                const { NativeWallet } = await import('@tetherto/wdk-wallet-native');
-                
-                const wdk = new WDK({
-                    wallet: new NativeWallet(process.env.WDK_SEED || ''),
-                    network: params.network as any,
+                // Delegate to backend which now handles multi-chain/asset deposits
+                const response = await http.post(`/wallet/startbutton/deposit`, {
+                    scheduleId: params.scheduleId,
+                    amountUsdt: params.amountUsdt
                 });
 
-                const account = await wdk.getAccount(0);
-                const tx = await account.transfer({
-                    token: "USDT",
-                    recipient: BRIDGE_ADDRESS,
-                    amount: params.amountUsdt
-                });
-                
-                account.dispose();
-                return { content: [{ type: "text", text: `Transfer to Bridge successful. Hash: ${tx.hash}` }] };
+                return { content: [{ type: "text", text: `Transfer to Bridge successful. Hash: ${response.data.txHash} on ${response.data.network}` }] };
             } catch (error: any) {
                 return { content: [{ type: "text", text: `Bridge transfer failed: ${error.message}` }], isError: true };
             }
@@ -264,7 +254,7 @@ export default function (api: any) {
         name: "apa_get_startbutton_balance",
         description: "Checks funding status on the bridge address first, then confirms the receipt on Startbutton's dashboard.",
         parameters: Type.Object({
-            network: Type.Optional(Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' })),
+            network: Type.Optional(Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc', 'xlm'], default: 'bsc' })),
         }),
         async execute(_id: string, params: { network?: string }) {
             try {
@@ -400,13 +390,14 @@ export default function (api: any) {
      */
     api.registerTool({
         name: "apa_payout",
-        description: "Execute an on-chain USDT payout to a recipient's wallet address via the WDK vault.",
+        description: "Execute an on-chain token payout (USDT/USDC) to a recipient's wallet address via the Blockchain vault.",
         parameters: Type.Object({
             batchId: Type.String({ description: "The ID of the batch" }),
             recipientIndex: Type.Number({ description: "The index of the recipient to process" }),
-            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc'], default: 'bsc' }),
+            network: Type.String({ enum: ['ethereum', 'polygon', 'arbitrum', 'base', 'optimism', 'bsc', 'xlm'], default: 'bsc' }),
+            asset: Type.Optional(Type.String({ default: 'USDT' })),
         }),
-        async execute(_id: string, params: { batchId: string; recipientIndex: number; network: string }) {
+        async execute(_id: string, params: { batchId: string; recipientIndex: number; network: string; asset?: string }) {
             try {
                 const batchResponse = await http.get(`/batches/${params.batchId}`);
                 const { recipients } = batchResponse.data;

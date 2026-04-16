@@ -1,2 +1,0 @@
-ALTER TYPE "public"."MarketingEventType" ADD VALUE 'DELIVERED' BEFORE 'OPENED';--> statement-breakpoint
-ALTER TABLE "marketing_campaigns" ALTER COLUMN "stats" SET DEFAULT '{"sent":0,"delivered":0,"opened":0,"clicked":0,"bounced":0,"unsubscribed":0}'::jsonb;

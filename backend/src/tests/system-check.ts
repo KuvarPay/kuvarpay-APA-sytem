@@ -1,5 +1,5 @@
 import { db, schema, eq } from 'rayswap-db';
-import { WdkService } from '../integrations/wdk';
+import { BlockchainService } from '../integrations/wdk';
 import { WdkSecretManager } from '../integrations/secret-manager';
 import { sendPayrollNotification } from '../services/email-service';
 import { FxService } from '../services/fx-service';
@@ -23,19 +23,19 @@ async function runCheck() {
         return;
     }
 
-    // 2. WDK Address Derivation
+    // 2. Blockchain Logic (Multi-chain)
     try {
-        console.log('\n--- 2. WDK Logic Check ---');
+        console.log('\n--- 2. Blockchain Logic Check ---');
         const seed = await WdkSecretManager.getSeed();
-        const wdk = new WdkService(seed);
+        const blockchain = new BlockchainService(seed);
         
-        const networks = ['bsc', 'polygon', 'tron', 'ethereum'];
+        const networks = ['bsc', 'polygon', 'tron', 'ethereum', 'xlm'];
         for (const net of networks) {
-            const addr = await wdk.getBatchAddress(0, net);
-            console.log(`✅ [${net.toUpperCase()}] derived address: ${addr}`);
+            const addr = await blockchain.getAddress(0, net);
+            console.log(`✅ [${net.toUpperCase()}] derived/master address: ${addr}`);
         }
     } catch (err: any) {
-        console.error('❌ WDK Derivation Failed:', err);
+        console.error('❌ Blockchain Logic Check Failed:', err);
     }
 
     // 3. FX Service Check
